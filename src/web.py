@@ -106,6 +106,10 @@ async def home():
 
 @app.get("/favicon.ico")
 async def favicon():
+    from fastapi.responses import FileResponse
+    ico_path = Path(__file__).parent.parent / "templates" / "favicon.ico"
+    if ico_path.exists():
+        return FileResponse(str(ico_path), media_type="image/x-icon")
     return PlainTextResponse("", status_code=204)
 
 

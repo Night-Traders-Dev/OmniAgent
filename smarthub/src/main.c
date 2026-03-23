@@ -2008,6 +2008,15 @@ int main(int argc, char *argv[]) {
     SDL_GetWindowSize(window, &screen_w, &screen_h);
     printf("[Hub] Display: %dx%d\n", screen_w, screen_h);
 
+    /* Set window icon */
+    {
+        const char *icon_paths[] = {"icon.png", "../icon.png", "smarthub/icon.png", NULL};
+        for (int i = 0; icon_paths[i]; i++) {
+            SDL_Surface *icon_surf = IMG_Load(icon_paths[i]);
+            if (icon_surf) { SDL_SetWindowIcon(window, icon_surf); SDL_FreeSurface(icon_surf); printf("[Hub] Icon loaded: %s\n", icon_paths[i]); break; }
+        }
+    }
+
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!renderer) {
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);

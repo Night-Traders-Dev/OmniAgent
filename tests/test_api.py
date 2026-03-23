@@ -52,7 +52,7 @@ class TestHome:
 
     def test_favicon(self, client):
         r = client.get("/favicon.ico")
-        assert r.status_code == 204
+        assert r.status_code in (200, 204)  # 200 if favicon.ico exists, 204 if not
 
 class TestMetrics:
     def test_returns(self, client):
