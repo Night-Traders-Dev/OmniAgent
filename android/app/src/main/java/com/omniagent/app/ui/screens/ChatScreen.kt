@@ -76,9 +76,13 @@ fun ChatScreen(vm: ChatViewModel) {
     Scaffold(
         topBar = { TopBar(state, onMenuClick = { vm.toggleSettings() }, onHistoryClick = { vm.toggleSessionDrawer() }, onSearchClick = { vm.toggleSearch() }) },
         bottomBar = { BottomControls(state, vm) },
-        containerColor = BgDark,
+        containerColor = Color.Transparent,
     ) { padding ->
-        Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            // Animated background layer
+            AnimatedBackground(modifier = Modifier.fillMaxSize())
+            // Content layer
+            Column(modifier = Modifier.fillMaxSize()) {
             // Always-visible compact metrics bar
             MetricsBar(state)
             AnimatedVisibility(visible = state.taskStartedAt != null) { StatusPill(state) }
@@ -126,7 +130,8 @@ fun ChatScreen(vm: ChatViewModel) {
                     }
                 }
             }
-        }
+        } // Column
+        } // Box
     }
 
     if (state.showSessionDrawer) {

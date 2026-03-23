@@ -1,6 +1,59 @@
 # OmniAgent Changelog
 
-## v8.5.0 — 2026-03-23 (Current)
+## v8.6.0 — 2026-03-23 (Current)
+
+### Smart Hub (Native C for OrangePi RV2 / Any Linux)
+
+- **Native C application** — SDL2 + libcurl + SDL2_ttf + SDL2_image, 90KB binary
+- **Animated background** — PS3/PS4/PS5-style flowing sine waves + bokeh particles, 30fps
+- **Weather-condition-aware sky** — procedural gradient changes based on condition (sunny/rain/snow/fog/storm/night/golden hour) and time of day
+- **News Live Area** — fetches headlines via `/api/hub/news` with category tabs (Top/Local/National/Global), source favicons as thumbnails
+- **Markets tab** — live market summary via `/api/hub/markets`
+- **Settings panel** — full server info, user, session, model, Ollama/BitNet status, token counts
+- **Session management** — new chat, session drawer, switch/delete sessions
+- **Touch keyboard** — GBoard-style QWERTY/Shift/Caps/Numbers/Symbols, key popups, backspace repeat
+- **Login screen** — username + password with keyboard integration
+- **Long-press context menus** — copy, resend, branch, pin, rate (thumbs up/down), delete on chat bubbles; open/delete on sessions
+- **Smart reply chips** — context-aware suggestions after each response
+- **Thinking/reasoning panel** — live color-coded progress log during task execution
+- **Fullscreen kiosk mode** — auto-discovers server on LAN, saves config for next boot
+- **Auto-discovery** — checks saved URL, default 192.168.254.2:8000, then scans gateway subnet
+- **SpacemiT NPU SDK** installer in setup script
+- **Threaded data fetching** — weather, news, markets all load in background threads, UI never blocks
+- **4 sidebar tabs** — Home (weather+metrics+actions+status), News, Markets, Settings
+- **One-command setup** — `bash smarthub/setup.sh` installs deps, builds, configures autostart
+- **3,500+ lines of C** across 9 files, compiles on x86_64 and RISC-V
+
+### Stylized UI Cards (WebUI + Android)
+
+- **Weather cards** — blue gradient, large temp, weather icon, forecast days with precipitation
+- **Code blocks** — language badge + per-block copy button
+- **Error cards** — red gradient with warning icon
+- **File operation cards** — green (create), yellow (edit), red (delete)
+- **Git status cards** — color-coded M/A/D/? indicators
+- **Weather condition sky backgrounds** — procedural gradient on Android weather cards (sunny/rain/snow/fog/storm/night/golden hour)
+- **Animated background** — Android app now has PS-style flowing waves + bokeh particles behind the chat
+
+### Single Source Version System
+
+- **`VERSION` file** — one file at project root, all platforms read it
+- **`/api/version`** endpoint returns plain text version
+- **Python**: `config.py` reads `VERSION` at import → feeds `web.py`, `mcp.py`, `base.py`, `platform.py`
+- **WebUI**: `fetchVersion()` on load → updates title, header, about
+- **Android**: `api.getVersion()` → settings displays server version
+- **Desktop/SmartHub**: reads from server at runtime — no rebuild needed for version bumps
+- **Tests**: assertions use `config.VERSION` dynamically — version bumps never break tests
+
+### GitHub CI/CD
+
+- **Win64 desktop build** — `build-desktop-windows` job using `cargo tauri build --bundles msi,nsis`
+- **Release workflow** — triggers on `v*` tags, builds Android APK + Linux deb/rpm + Windows MSI/NSIS, uploads all to GitHub Release
+- **CI fixes** — `requirements-ci.txt` (no GPU/audio deps), frontend dist auto-generated for Tauri builds
+- **.mcp.json** — project-level MCP server config for Claude Code integration
+
+---
+
+## v8.5.0 — 2026-03-23
 
 ### Full MCP (Model Context Protocol) Support
 

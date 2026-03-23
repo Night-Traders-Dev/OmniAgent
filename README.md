@@ -1,4 +1,4 @@
-# OmniAgent v8.5.0
+# OmniAgent v8.6.0
 
 **Fully local, autonomous AI agent framework** — 47 tools, 7 specialist agents, multi-phase task execution, running entirely on your hardware with no cloud API keys required.
 
@@ -10,6 +10,7 @@
 | **Android** | Production | `android/app/build/outputs/apk/debug/app-debug.apk` |
 | **Linux Desktop** | Production | `desktop/src-tauri/target/release/bundle/deb/` |
 | **GPU Worker** | Optional | `gpu_worker.py` (second PC) |
+| **Smart Hub** | Production | `smarthub/` (native C, 90KB, OrangePi/any Linux) |
 | **MCP Server** | Production | `mcp_server.py` (stdio for Claude Desktop/Code) |
 
 ## Quick Start

@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.*
@@ -609,18 +611,47 @@ private fun dayName(dateStr: String): String = try {
     java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(cal.time)
 } catch (_: Throwable) { dateStr }
 
+private fun skyGradient(condition: String): List<Color> {
+    val c = condition.lowercase()
+    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+    val night = hour < 6 || hour >= 20
+    val golden = (hour in 6..7) || (hour in 17..19)
+
+    return when {
+        night && ("cloud" in c || "overcast" in c) -> listOf(Color(0xFF0F1220), Color(0xFF141830), Color(0xFF192030))
+        night -> listOf(Color(0xFF080C1E), Color(0xFF0C122D), Color(0xFF121937))
+        "rain" in c || "drizzle" in c || "shower" in c -> listOf(Color(0xFF283240), Color(0xFF374150), Color(0xFF46505F))
+        "thunder" in c || "storm" in c -> listOf(Color(0xFF191622), Color(0xFF282338), Color(0xFF373246))
+        "snow" in c || "blizzard" in c -> listOf(Color(0xFF8C9BAF), Color(0xFFA0AFC3), Color(0xFFB4C3D2))
+        "fog" in c || "mist" in c -> listOf(Color(0xFF50555F), Color(0xFF646973), Color(0xFF787D84))
+        "overcast" in c || "cloud" in c -> listOf(Color(0xFF374150), Color(0xFF4B5564), Color(0xFF5A6473))
+        golden -> listOf(Color(0xFF32508C), Color(0xFF8C6446), Color(0xFFC8823C))
+        "partly" in c -> listOf(Color(0xFF2D55A0), Color(0xFF5073B4), Color(0xFF6E96C8))
+        else -> listOf(Color(0xFF1E50B4), Color(0xFF3C78D2), Color(0xFF64AAF0)) // clear/sunny
+    }
+}
+
 @Composable
 fun WeatherCardView(card: MdBlock.WeatherCard) {
-    Surface(
-        shape = RoundedCornerShape(12.dp),
-        color = WeatherBgTop,
-        border = BorderStroke(1.dp, Color(0xFF2A4A6A)),
-        modifier = Modifier.fillMaxWidth(),
+    val skyColors = skyGradient(card.condition)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Brush.verticalGradient(skyColors))
     ) {
+        // Semi-transparent overlay at bottom for text readability
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .height(40.dp)
+                .background(Color(0, 0, 0, 60))
+        )
         Column(modifier = Modifier.padding(16.dp)) {
             // Header: location + icon
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("\uD83D\uDCCD ${card.location}", fontSize = 12.sp, color = WeatherDim,
+                Text("\uD83D\uDCCD ${card.location}", fontSize = 12.sp, color = Color(0xFFB4D4F0),
                     fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp)
                 Text(weatherIcon(card.condition), fontSize = 28.sp)
             }

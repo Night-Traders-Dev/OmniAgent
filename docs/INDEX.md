@@ -1,4 +1,4 @@
-# OmniAgent v8.5.0 — Documentation
+# OmniAgent v8.6.0 — Documentation
 
 ## Guides
 
@@ -34,6 +34,7 @@ Endpoints:  155 REST + 1 WebSocket + 1 MCP JSON-RPC (stdio + SSE transport)
 MCP:        Full server (46 tools, 4 resources, 6 prompts) + client (stdio/SSE)
 DB Tables:  14 (SQLite with Fernet encryption)
 Tests:      396 total (all passing)
-Platforms:  5 (WebUI, Android, Linux Desktop, VS Code, MCP)
-On-device:  Gemini Nano (S24/S25/Pixel 8+) + TFLite NNAPI fallback
+Platforms:  6 (WebUI, Android, Linux Desktop, Smart Hub, VS Code, MCP)
+SmartHub:   3,500+ lines C, 90KB binary (SDL2 + libcurl), animated background
+On-device:  Gemini Nano (S24/S25/Pixel 8+) + TFLite NNAPI + SpacemiT NPU (OrangePi)
 ```

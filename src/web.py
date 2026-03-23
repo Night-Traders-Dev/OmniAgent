@@ -2412,11 +2412,16 @@ async def hub_news(category: str = "top"):
             items = []
         news = []
         for item in items[:8]:
+            href = item.get("href", "")
+            source = href.split("/")[2] if "://" in href else ""
+            # Generate favicon URL as thumbnail (fast, no extra fetch needed)
+            thumb = f"https://www.google.com/s2/favicons?domain={source}&sz=64" if source else ""
             news.append({
                 "title": item.get("title", ""),
                 "body": item.get("body", "")[:200],
-                "url": item.get("href", ""),
-                "source": item.get("href", "").split("/")[2] if "://" in item.get("href", "") else "",
+                "url": href,
+                "source": source,
+                "thumbnail": thumb,
             })
         return news
 
@@ -2425,32 +2430,42 @@ async def hub_news(category: str = "top"):
 
 @app.get("/api/hub/markets")
 async def hub_markets():
-    """Fetch market summary for the Smart Hub Live Area."""
+    """Fetch market data for the Smart Hub Live Area."""
     import asyncio
     loop = asyncio.get_event_loop()
-    from src.tools import fetch_url
     import json as _json
 
     def _fetch():
-        try:
-            raw = fetch_url("https://query1.finance.yahoo.com/v8/finance/chart/?symbols=^GSPC,^IXIC,^DJI,BTC-USD,ETH-USD&range=1d&interval=1d", max_chars=5000)
-            return raw
-        except Exception:
-            return ""
-
-    # Use web search as fallback since Yahoo Finance API may be blocked
-    def _fetch_search():
         from src.tools import web_search
-        results_raw = web_search("S&P 500 Dow Jones Nasdaq Bitcoin price today", max_results=3)
+        # Fetch individual market indices
+        symbols = [
+            {"name": "S&P 500", "symbol": "SPX", "query": "S&P 500 index price today"},
+            {"name": "Nasdaq", "symbol": "IXIC", "query": "Nasdaq composite price today"},
+            {"name": "Dow Jones", "symbol": "DJI", "query": "Dow Jones price today"},
+            {"name": "Bitcoin", "symbol": "BTC", "query": "Bitcoin BTC price today USD"},
+            {"name": "Ethereum", "symbol": "ETH", "query": "Ethereum ETH price today USD"},
+        ]
+        tickers = []
+        # Single search for all
+        results_raw = web_search("S&P 500 Nasdaq Dow Jones Bitcoin Ethereum price today", max_results=5)
         try:
             items = _json.loads(results_raw)
-            summary = "; ".join(f"{i.get('title','')}" for i in items[:3])
-            return summary
+            summary = "; ".join(f"{i.get('title','')}" for i in items[:5])
         except Exception:
-            return "Market data unavailable"
+            items = []
+            summary = "Market data unavailable"
 
-    raw = await loop.run_in_executor(None, _fetch_search)
-    return JSONResponse({"summary": raw, "timestamp": __import__("time").time()})
+        for sym in symbols:
+            tickers.append({
+                "name": sym["name"],
+                "symbol": sym["symbol"],
+                "icon": f"https://www.google.com/s2/favicons?domain=finance.yahoo.com&sz=32",
+            })
+        return {"tickers": tickers, "summary": summary}
+
+    data = await loop.run_in_executor(None, _fetch)
+    data["timestamp"] = __import__("time").time()
+    return JSONResponse(data)
 
 # --- Upload management ---
 
