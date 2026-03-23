@@ -1,6 +1,6 @@
 import os
 import asyncio
-from src.config import CLIENT, EXPERTS, SYSTEM_PROMPT, PLAN_FILE
+from src.config import EXPERTS, SYSTEM_PROMPT, PLAN_FILE, create_chat_completion
 from src.state import state
 from src.tools import parse_json, read_file, write_file, run_shell, web_search
 
@@ -20,10 +20,11 @@ class Coordinator:
             "'plan': 'updated_steps'}"
         )
 
-        raw_route = await loop.run_in_executor(
+        raw_route, _ = await loop.run_in_executor(
             None,
-            lambda: CLIENT.chat.completions.create(
+            lambda: create_chat_completion(
                 model=EXPERTS["general"],
+                model_key="general",
                 messages=[
                     {"role": "system", "content": route_prompt},
                     {"role": "user", "content": f"{auto_context}\n\nREQ: {user_input}"},
@@ -39,10 +40,11 @@ class Coordinator:
         tool_result = self._execute_tool(data)
 
         expert_model = EXPERTS.get(data.get("expert"), EXPERTS["general"])
-        final_response = await loop.run_in_executor(
+        final_response, _ = await loop.run_in_executor(
             None,
-            lambda: CLIENT.chat.completions.create(
+            lambda: create_chat_completion(
                 model=expert_model,
+                model_key=data.get("expert"),
                 messages=[
                     {
                         "role": "system",

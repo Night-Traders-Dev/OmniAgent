@@ -183,7 +183,16 @@ OmniAgent automatically creates a Cloudflare tunnel for internet access:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OLLAMA_NUM_CTX` | `32768` | Context window for Ollama models |
+| `GENERAL_MODEL` | `qwen3:8b` | Override the orchestrator/general model |
+| `REASONING_MODEL` | `deepseek-r1:8b` | Override the reasoning specialist model |
+| `CODING_MODEL` | `qwen2.5-coder:7b` | Override the coding specialist model |
+| `SECURITY_MODEL` | `dolphin3:8b` | Override the security specialist model |
 | `BITNET_PORT` | `8081` | BitNet llama-server port |
+| `BITNET_MODEL` | `bitnet-2b` | Override the BitNet model name |
+| `MINIMAX_API_KEY` | — | Enable MiniMax via its OpenAI-compatible API |
+| `MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | MiniMax OpenAI-compatible API base URL |
+| `MINIMAX_MODEL` | `MiniMax-M2.7` | MiniMax model name for explicit remote use or fallback |
+| `MINIMAX_FALLBACK_ROLES` | — | Comma-separated roles allowed to fall back to MiniMax |
 | `WORKER_SECRET` | — | GPU worker E2E encryption key |
 | `WORKER_URL` | — | Manual GPU worker URL (WSL2) |
 | `GITHUB_CLIENT_ID` | — | GitHub OAuth app client ID |
@@ -195,6 +204,22 @@ OmniAgent automatically creates a Cloudflare tunnel for internet access:
 | `SESSION_TTL_HOURS` | `72` | Session expiry time |
 | `MAX_UPLOAD_DIR_MB` | `500` | Upload directory size limit |
 | `DEV` | — | Set to `1` for hot reload mode |
+
+Example: keep local defaults, but let the orchestrator fall back to MiniMax if Ollama is unavailable.
+
+```bash
+export MINIMAX_API_KEY=your_key_here
+export MINIMAX_FALLBACK_ROLES=general
+python omni_agent.py
+```
+
+Example: make the orchestrator use MiniMax directly while keeping the coding/reasoning specialists local.
+
+```bash
+export MINIMAX_API_KEY=your_key_here
+export GENERAL_MODEL=MiniMax-M2.7
+python omni_agent.py
+```
 
 ## MCP Setup
 

@@ -182,6 +182,54 @@ class TestModelDefaults:
         assert result["ok"] is True
         assert captured["model"] == "qwen3:8b"
 
+    def test_minimax_model_uses_remote_client(self, monkeypatch):
+        from src import config
+
+        local_client = object()
+        remote_client = object()
+
+        monkeypatch.setattr(config, "CLIENT", local_client)
+        monkeypatch.setattr(config, "MINIMAX_CLIENT", remote_client)
+
+        assert config.get_client_for_model("qwen3:8b") is local_client
+        assert config.get_client_for_model("MiniMax-M2.7") is remote_client
+
+    def test_minimax_fallback_can_take_over_general_role(self, monkeypatch):
+        from src import config
+
+        calls = []
+
+        class FailingCompletions:
+            def create(self, **kwargs):
+                calls.append(("local", kwargs["model"]))
+                raise RuntimeError("ollama offline")
+
+        class RemoteCompletions:
+            def create(self, **kwargs):
+                calls.append(("remote", kwargs["model"]))
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(message=types.SimpleNamespace(content="ok"))],
+                    usage=None,
+                )
+
+        local_client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=FailingCompletions()))
+        remote_client = types.SimpleNamespace(chat=types.SimpleNamespace(completions=RemoteCompletions()))
+
+        monkeypatch.setattr(config, "CLIENT", local_client)
+        monkeypatch.setattr(config, "MINIMAX_CLIENT", remote_client)
+        monkeypatch.setattr(config, "MINIMAX_MODEL", "MiniMax-M2.7")
+        monkeypatch.setattr(config, "MINIMAX_FALLBACK_ROLES", {"general"})
+
+        response, used_model = config.create_chat_completion(
+            model="qwen3:8b",
+            model_key="general",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        assert response.choices[0].message.content == "ok"
+        assert used_model == "MiniMax-M2.7"
+        assert calls == [("local", "qwen3:8b"), ("remote", "MiniMax-M2.7")]
+
 
 class TestFeatures:
     def test_pin_and_unpin(self):

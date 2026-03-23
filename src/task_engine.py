@@ -524,12 +524,13 @@ async def plan_long_task(description: str, session_id: str) -> dict:
         f"Use 2-6 phases. Set requires_approval=true for destructive phases (delete, deploy, migrate)."
     )
 
-    from src.config import CLIENT, EXPERTS
+    from src.config import EXPERTS, create_chat_completion
     loop = asyncio.get_event_loop()
-    response = await loop.run_in_executor(
+    response, _ = await loop.run_in_executor(
         None,
-        lambda: CLIENT.chat.completions.create(
+        lambda: create_chat_completion(
             model=EXPERTS["general"],
+            model_key="general",
             messages=[{"role": "user", "content": plan_prompt}],
             response_format={"type": "json_object"},
         ),

@@ -13,7 +13,13 @@ import json
 import re
 import textwrap
 from datetime import datetime
-from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED
+from src.config import (
+    EXPERTS,
+    BITNET_CLIENT,
+    BITNET_MODEL,
+    BITNET_ENABLED,
+    create_chat_completion,
+)
 from src.state import state
 from src.tools import parse_json, detect_uncertainty, TOOL_REGISTRY
 from src.agents.base import BaseAgent, AgentResult, AgentStatus, estimate_cost
@@ -465,15 +471,26 @@ class Orchestrator:
                 self._log("⚡ BitNet: Planning dispatch on CPU (bitnet-2b, 1.58-bit)")
                 client = BITNET_CLIENT
                 model = BITNET_MODEL
+                completion_call = lambda: client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                )
             else:
-                client = CLIENT
                 model = EXPERTS["general"]
+                completion_call = lambda: create_chat_completion(
+                    model=model,
+                    model_key="general",
+                    messages=messages,
+                    response_format={"type": "json_object"},
+                )
 
-            response = await loop.run_in_executor(
-                None,
-                lambda: client.chat.completions.create(model=model, messages=messages, response_format={"type": "json_object"}),
-            )
+            response_data = await loop.run_in_executor(None, completion_call)
             state.total_llm_calls += 1
+            if BITNET_ENABLED:
+                response = response_data
+            else:
+                response, model = response_data
             plan = parse_json(response.choices[0].message.content)
 
             if BITNET_ENABLED and plan:
@@ -498,10 +515,13 @@ class Orchestrator:
             if BITNET_ENABLED:
                 self._log("⚡ BitNet: Plan generation failed, falling back to GPU model")
                 try:
-                    response = await loop.run_in_executor(
+                    response, _ = await loop.run_in_executor(
                         None,
-                        lambda: CLIENT.chat.completions.create(
-                            model=EXPERTS["general"], messages=messages, response_format={"type": "json_object"},
+                        lambda: create_chat_completion(
+                            model=EXPERTS["general"],
+                            model_key="general",
+                            messages=messages,
+                            response_format={"type": "json_object"},
                         ),
                     )
                     state.total_llm_calls += 1
@@ -600,10 +620,11 @@ class Orchestrator:
             for r in results
         )
         try:
-            response = await loop.run_in_executor(
+            response, _ = await loop.run_in_executor(
                 None,
-                lambda: CLIENT.chat.completions.create(
+                lambda: create_chat_completion(
                     model=EXPERTS["general"],
+                    model_key="general",
                     messages=[
                         {"role": "system", "content": REFLECTION_PROMPT},
                         {"role": "user", "content": f"USER REQUEST: {user_input}\n\nAGENT RESULTS:\n{results_summary}"},
@@ -634,9 +655,13 @@ class Orchestrator:
                 "role": "user",
                 "content": f"CURRENT REQUEST: {user_input}\n\nAGENT RESULTS:\n{results_text}",
             })
-            response = await loop.run_in_executor(
+            response, _ = await loop.run_in_executor(
                 None,
-                lambda: CLIENT.chat.completions.create(model=EXPERTS["general"], messages=messages),
+                lambda: create_chat_completion(
+                    model=EXPERTS["general"],
+                    model_key="general",
+                    messages=messages,
+                ),
             )
             state.total_llm_calls += 1
             return response.choices[0].message.content
@@ -749,9 +774,14 @@ class Orchestrator:
         messages.append({"role": "user", "content": f"CURRENT REQUEST: {user_input}\n\nAGENT RESULTS:\n{results_text}"})
 
         try:
-            response = await loop.run_in_executor(
+            response, _ = await loop.run_in_executor(
                 None,
-                lambda: CLIENT.chat.completions.create(model=EXPERTS["general"], messages=messages, stream=True),
+                lambda: create_chat_completion(
+                    model=EXPERTS["general"],
+                    model_key="general",
+                    messages=messages,
+                    stream=True,
+                ),
             )
             state.total_llm_calls += 1
             for chunk in response:

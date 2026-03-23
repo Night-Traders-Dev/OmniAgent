@@ -8,7 +8,17 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator
-from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED, OLLAMA_NUM_CTX, VERSION
+from src.config import (
+    EXPERTS,
+    BITNET_CLIENT,
+    BITNET_MODEL,
+    BITNET_ENABLED,
+    OLLAMA_NUM_CTX,
+    VERSION,
+    create_chat_completion,
+    get_client_for_model,
+    get_model_for_role,
+)
 from src.state import state
 from src.tools import (
     parse_json, execute_tool, TOOL_REGISTRY, TOOL_TIMEOUTS,
@@ -78,15 +88,13 @@ class BaseAgent:
 
     @property
     def model(self) -> str:
-        if state.model_override and state.model_override != "auto":
-            return state.model_override
-        return EXPERTS.get(self.model_key, EXPERTS["general"])
+        return get_model_for_role(self.model_key, state.model_override)
 
     @property
     def llm_client(self):
         if self.model_key == "fast" and BITNET_ENABLED:
             return BITNET_CLIENT
-        return CLIENT
+        return get_client_for_model(self.model)
 
     def _available_tool_names(self) -> list[str]:
         if self.max_tool_steps <= 0:
@@ -138,11 +146,16 @@ class BaseAgent:
         try:
             messages = self._build_messages(task, context, conversation)
             cost = estimate_cost(self.model_key, len(str(messages)))
-            response = await loop.run_in_executor(
+            response, used_model = await loop.run_in_executor(
                 None,
-                lambda: self.llm_client.chat.completions.create(model=self.model, messages=messages),
+                lambda: create_chat_completion(
+                    model=self.model,
+                    model_key=self.model_key,
+                    messages=messages,
+                ),
             )
             state.total_llm_calls += 1
+            state.active_model = used_model
             token_cost = 0
             if hasattr(response, 'usage') and response.usage:
                 pin = getattr(response.usage, 'prompt_tokens', 0)
@@ -165,11 +178,17 @@ class BaseAgent:
         loop = asyncio.get_event_loop()
         messages = self._build_messages(task, context, conversation)
         try:
-            response = await loop.run_in_executor(
+            response, used_model = await loop.run_in_executor(
                 None,
-                lambda: self.llm_client.chat.completions.create(model=self.model, messages=messages, stream=True),
+                lambda: create_chat_completion(
+                    model=self.model,
+                    model_key=self.model_key,
+                    messages=messages,
+                    stream=True,
+                ),
             )
             state.total_llm_calls += 1
+            state.active_model = used_model
             full = []
             for chunk in response:
                 if chunk.choices and chunk.choices[0].delta.content:
@@ -207,10 +226,16 @@ class BaseAgent:
         messages.append({"role": "user", "content": task})
 
         try:
-            response = await loop.run_in_executor(
-                None, lambda: self.llm_client.chat.completions.create(model=self.model, messages=messages),
+            response, used_model = await loop.run_in_executor(
+                None,
+                lambda: create_chat_completion(
+                    model=self.model,
+                    model_key=self.model_key,
+                    messages=messages,
+                ),
             )
             state.total_llm_calls += 1
+            state.active_model = used_model
             output = response.choices[0].message.content
             self.status = AgentStatus.SUCCESS
             return AgentResult(agent_name=self.name, status=AgentStatus.SUCCESS, output=output)
@@ -285,11 +310,16 @@ class BaseAgent:
                     pass
 
             try:
-                response = await loop.run_in_executor(
+                response, used_model = await loop.run_in_executor(
                     None,
-                    lambda: self.llm_client.chat.completions.create(model=self.model, messages=messages),
+                    lambda: create_chat_completion(
+                        model=self.model,
+                        model_key=self.model_key,
+                        messages=messages,
+                    ),
                 )
                 state.total_llm_calls += 1
+                state.active_model = used_model
                 if hasattr(response, 'usage') and response.usage:
                     pin = getattr(response.usage, 'prompt_tokens', 0)
                     pout = getattr(response.usage, 'completion_tokens', 0)
@@ -406,11 +436,16 @@ class BaseAgent:
         # Exhausted steps
         messages.append({"role": "user", "content": "You've used all available tool steps. Please provide your final answer now."})
         try:
-            response = await loop.run_in_executor(
+            response, used_model = await loop.run_in_executor(
                 None,
-                lambda: self.llm_client.chat.completions.create(model=self.model, messages=messages),
+                lambda: create_chat_completion(
+                    model=self.model,
+                    model_key=self.model_key,
+                    messages=messages,
+                ),
             )
             state.total_llm_calls += 1
+            state.active_model = used_model
             output = response.choices[0].message.content
         except Exception as e:
             output = f"Error in final step: {e}"

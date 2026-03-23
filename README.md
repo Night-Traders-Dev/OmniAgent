@@ -86,6 +86,8 @@ DEV=1 python omni_agent.py
 | On-Device | Gemini Nano | Query rewrite, intent, sentiment, summarize (NPU) |
 | Vision | `qwen3-vl:8b` | Image analysis |
 
+Optional remote fallback: OmniAgent can also call MiniMax through its OpenAI-compatible API without replacing the local-first defaults. Set `MINIMAX_API_KEY`, then either point a role at `MiniMax-M2.7` directly or enable fallback for selected roles with `MINIMAX_FALLBACK_ROLES=general,reasoning`.
+
 ## Key Features
 
 ### AI Intelligence
@@ -261,7 +263,16 @@ Interactive Swagger UI available at `http://localhost:8000/docs` when the server
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OLLAMA_NUM_CTX` | `32768` | Context window size for Ollama models |
+| `GENERAL_MODEL` | `qwen3:8b` | Override the orchestrator/general model at startup |
+| `REASONING_MODEL` | `deepseek-r1:8b` | Override the reasoning specialist model at startup |
+| `CODING_MODEL` | `qwen2.5-coder:7b` | Override the coding specialist model at startup |
+| `SECURITY_MODEL` | `dolphin3:8b` | Override the security specialist model at startup |
 | `BITNET_PORT` | `8081` | BitNet llama-server port |
+| `BITNET_MODEL` | `bitnet-2b` | Override the BitNet model name at startup |
+| `MINIMAX_API_KEY` | _(empty)_ | Enable MiniMax via its OpenAI-compatible API |
+| `MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | MiniMax OpenAI-compatible API base URL |
+| `MINIMAX_MODEL` | `MiniMax-M2.7` | MiniMax model used for explicit remote assignments and fallback |
+| `MINIMAX_FALLBACK_ROLES` | _(empty)_ | Comma-separated roles allowed to fall back to MiniMax, e.g. `general,reasoning` |
 | `WORKER_SECRET` | _(empty)_ | Shared secret for GPU worker E2E encryption |
 | `WORKER_URL` | _(empty)_ | Manual GPU worker URL (for WSL2) |
 | `GITHUB_CLIENT_ID` | _(empty)_ | GitHub OAuth client ID |

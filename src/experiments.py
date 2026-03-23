@@ -20,7 +20,7 @@ log = logging.getLogger("experiments")
 
 async def compare_models(prompt: str, model_a: str, model_b: str, context: str = "") -> dict:
     """Run the same prompt through two models and return both responses."""
-    from src.config import CLIENT
+    from src.config import create_chat_completion
     loop = asyncio.get_event_loop()
 
     messages = [{"role": "user", "content": prompt}]
@@ -30,15 +30,15 @@ async def compare_models(prompt: str, model_a: str, model_b: str, context: str =
     async def run_model(model: str) -> dict:
         start = time.time()
         try:
-            response = await loop.run_in_executor(
+            response, used_model = await loop.run_in_executor(
                 None,
-                lambda: CLIENT.chat.completions.create(model=model, messages=messages),
+                lambda: create_chat_completion(model=model, messages=messages),
             )
             elapsed = time.time() - start
             reply = response.choices[0].message.content
             tokens = getattr(response.usage, 'completion_tokens', 0) if response.usage else 0
             return {
-                "model": model,
+                "model": used_model,
                 "reply": reply,
                 "tokens": tokens,
                 "latency": round(elapsed, 1),

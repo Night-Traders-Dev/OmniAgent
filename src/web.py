@@ -617,19 +617,19 @@ class CompareReq(BaseModel):
 async def compare_models(req: CompareReq):
     """Send the same prompt to multiple models and return all responses."""
     import asyncio as _aio
-    from src.config import CLIENT
+    from src.config import create_chat_completion
     loop = _aio.get_event_loop()
 
     async def query_model(model: str) -> dict:
         try:
-            response = await loop.run_in_executor(
+            response, used_model = await loop.run_in_executor(
                 None,
-                lambda: CLIENT.chat.completions.create(
+                lambda: create_chat_completion(
                     model=model,
                     messages=[{"role": "user", "content": req.message}],
                 ),
             )
-            return {"model": model, "reply": response.choices[0].message.content, "ok": True}
+            return {"model": used_model, "reply": response.choices[0].message.content, "ok": True}
         except Exception as e:
             return {"model": model, "reply": f"Error: {e}", "ok": False}
 
