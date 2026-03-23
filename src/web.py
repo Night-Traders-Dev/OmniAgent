@@ -2125,6 +2125,21 @@ async def api_rate_message(req: RateReq):
     if 0 <= req.message_index < len(sess.chat_history):
         msg = sess.chat_history[req.message_index]
         rate_message(user["id"], msg.get("content", ""), req.rating, req.session_id)
+        # Collect fine-tuning data from ratings
+        try:
+            from src.experiments import collect_training_sample
+            if req.rating == "thumbs_up" and req.message_index > 0:
+                user_msg = sess.chat_history[req.message_index - 1].get("content", "")
+                assistant_msg = msg.get("content", "")
+                if user_msg and assistant_msg:
+                    collect_training_sample(user_msg, assistant_msg)
+            elif req.rating == "thumbs_down" and req.message_index > 0:
+                user_msg = sess.chat_history[req.message_index - 1].get("content", "")
+                assistant_msg = msg.get("content", "")
+                if user_msg and assistant_msg:
+                    collect_training_sample(user_msg, "", bad_response=assistant_msg)
+        except Exception:
+            pass
         return JSONResponse({"ok": True})
     return JSONResponse({"error": "Invalid message index"}, status_code=400)
 

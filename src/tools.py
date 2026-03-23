@@ -8,6 +8,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 import asyncio
+from pathlib import Path
 import time
 import ipaddress
 import socket
@@ -573,7 +574,7 @@ def regex_replace(path: str, pattern: str, replacement: str, count: int = 0) -> 
     except re.error as e:
         return f"ERROR: Invalid regex — {e}"
     except Exception as e:
-        return str(_err(str(e), ToolErrorKind.IO))
+        return str(_err(str(e), ToolErrorKind.EXECUTION))
 
 
 def batch_edit(edits: list[dict]) -> str:
