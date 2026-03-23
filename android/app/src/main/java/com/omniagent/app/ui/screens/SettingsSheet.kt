@@ -366,6 +366,8 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
             // History
             SettingsSection("History") {
                 SettingsButton("Reasoning / Thinking Log", Accent) { vm.loadReasoningHistory() }
+                Spacer(Modifier.height(4.dp))
+                SettingsButton("Long-Running Tasks", Accent) { vm.loadTaskHistory() }
             }
 
             // About

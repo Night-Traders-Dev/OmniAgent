@@ -56,29 +56,43 @@ def decrypt(ciphertext: str) -> str:
         return "[encrypted]"
 
 
-class _DBConnection:
-    """Auto-closing wrapper for SQLite connections — ensures close on exit or GC."""
+import threading
+
+class _DBPool:
+    """Thread-local SQLite connection pool. Each thread reuses its own connection."""
     def __init__(self):
-        self.conn = sqlite3.connect(str(DB_PATH), timeout=10.0)
-        self.conn.row_factory = sqlite3.Row
-        self.conn.execute("PRAGMA journal_mode=WAL")
-        self._closed = False
+        self._local = threading.local()
+
+    def get(self):
+        conn = getattr(self._local, 'conn', None)
+        if conn is None:
+            conn = sqlite3.connect(str(DB_PATH), timeout=10.0, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=5000")
+            self._local.conn = conn
+        return conn
+
+_pool = _DBPool()
+
+
+class _DBConnection:
+    """Wrapper that returns a pooled connection. Does NOT close on exit — reused by thread."""
+    def __init__(self):
+        self.conn = _pool.get()
     def __enter__(self):
         return self.conn
     def __exit__(self, *args):
-        if not self._closed:
-            self.conn.close()
-            self._closed = True
+        pass  # Don't close — pooled
     def __del__(self):
-        if not self._closed:
-            try: self.conn.close()
-            except Exception: pass
-            self._closed = True
+        pass  # Don't close — pooled
     def __getattr__(self, name):
         return getattr(self.conn, name)
+    def close(self):
+        pass  # No-op for backward compat — connection stays in pool
 
 def get_db():
-    """Get a database connection. Use as context manager: with get_db() as conn: ..."""
+    """Get a pooled database connection. Thread-safe, reuses per-thread."""
     return _DBConnection()
 
 

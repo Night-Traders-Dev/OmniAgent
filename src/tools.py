@@ -169,6 +169,7 @@ TOOL_TIMEOUTS = {
     # Other
     "database": 15, "docker": 15, "pdf_read": 15, "archive": 30,
     "spawn_agent": 120, "env_get": 2, "env_set": 2,
+    "sandbox_run": 60,
 }
 
 
@@ -958,6 +959,7 @@ TOOL_REGISTRY = {
     "pdf_read": {"fn": "pdf_read_tool", "description": "Extract text from a PDF file", "args": "path, [max_pages]"},
     "archive": {"fn": "archive_tool", "description": "List, extract, or create zip/tar archives", "args": "action, path, [dest]"},
     "git_stash": {"fn": "git_stash_tool", "description": "Git stash operations: push (save checkpoint), pop (restore), list", "args": "[action]"},
+    "sandbox_run": {"fn": "sandbox_run_tool", "description": "Run code safely in a Docker sandbox (no network, limited memory). Use for untrusted code", "args": "code, [language], [timeout]"},
     "deep_research": {"fn": "deep_research", "description": "Multi-step web research: search → read top results → extract key facts. Better than 'web' for complex questions", "args": "query, [max_depth]"},
     "multi_search": {"fn": "multi_search", "description": "Run multiple search queries and combine unique results. Good for comparing topics", "args": "queries"},
     "json_extract": {"fn": "json_extract", "description": "Extract data from JSON using dot-notation path (e.g. 'data.0.name'). Useful for API responses", "args": "data, [path]"},
@@ -1318,6 +1320,15 @@ def archive_tool(action: str, path: str, dest: str = ".") -> str:
         except Exception as e:
             return f"ERROR: {e}"
     return "ERROR: action must be 'list', 'extract', or 'create'"
+
+def sandbox_run_tool(code: str, language: str = "python", timeout: int = 30) -> str:
+    """Run code in a Docker sandbox."""
+    from src.platform import run_sandboxed
+    result = run_sandboxed(code, language, timeout)
+    if result.get("sandbox"):
+        return f"[SANDBOXED] EXIT:{result.get('exit_code',0)}\n{result.get('stdout','')}\n{result.get('stderr','')}"
+    return result.get("output", result.get("error", "Unknown error"))
+
 
 def git_stash_tool(action: str = "push") -> str:
     """Git stash operations: push, pop, list."""

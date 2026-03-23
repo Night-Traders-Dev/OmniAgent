@@ -1,6 +1,41 @@
 # OmniAgent Changelog
 
-## v8.1.0 — 2026-03-23 (Current)
+## v8.2.0 — 2026-03-23 (Current)
+
+### Platform Features
+- **Auto model selection** — Benchmarks installed Ollama models on demand (speed, quality, latency). `GET /api/models/benchmark`, `GET /api/models/best?role=coding`
+- **Sandboxed code execution** — Run untrusted code in Docker containers (no network, 256MB RAM limit, PID limit). Falls back to direct execution if Docker unavailable. New tool: `sandbox_run`
+- **WebSocket collaboration** — Real-time endpoint `ws://{host}/ws/{session_id}` for multi-user live chat
+- **MCP server support** — Model Context Protocol at `/mcp/manifest` and `/mcp/execute`. Exposes all 47 tools via MCP/1.0
+- **Discord/Slack notifications** — Configure webhook URLs via `POST /api/notifications/config`. Auto-notifies on task completion
+- **Swagger UI** — Interactive API docs at `/docs` and `/redoc` with all 140+ endpoints documented
+
+### Conversation Intelligence
+- **Cross-session search** — `GET /api/search/global?q=` searches across ALL conversations, decrypts and matches
+- **Pinned messages** — Pin important messages that persist in context even after compression. Injected into every prompt
+- **PDF export** — `GET /api/export/pdf` generates formatted HTML document
+- **User preference learning** — Auto-detects coding style from corrections ("use tabs", "snake_case"). Persists per-user
+- **Scheduled tasks** — Cron-style automation: "daily", "hourly", "weekly", "30m". Background thread checks every minute
+
+### Performance & Reliability
+- **DB connection pooling** — Thread-local SQLite pool replaces open/close per query. Eliminates WAL contention
+- **Non-blocking auth** — `authenticate_user()` and `create_user()` wrapped in `run_in_executor` for async handlers
+- **47 tools** — Added `sandbox_run` for safe code execution
+
+### UI/UX
+- **Dark/Light theme toggle** — ☼ button in WebUI header. Persists in localStorage
+- **Image paste in chat** — Paste screenshots/images directly into the text input. Auto-uploads and prompts vision analysis
+- **Smart reply chips** — Context-aware suggestion buttons on WebUI (parity with Android)
+- **Conversation branching** — ⌥ button on user messages to fork the conversation
+
+### DevOps
+- **CI/CD pipeline** — GitHub Actions workflow: Python lint + pytest, Android APK build + artifact upload
+- **Docker health checks** — Both Ollama and OmniAgent containers have health check endpoints
+- **systemd service** — Updated with 32K context env var
+
+---
+
+## v8.1.0 — 2026-03-23
 
 ### Reasoning / Thinking History
 - Historical reasoning log viewable on both WebUI and Android

@@ -58,7 +58,7 @@ class CodingAgent(BaseAgent):
     name = "coder"
     role = "writing, reviewing, debugging, and refactoring code with file access"
     model_key = "coding"
-    max_tool_steps = 8
+    max_tool_steps = 30  # Expanded for complex refactors (was 8)
     system_prompt = (
         "You are a coding agent that EXECUTES tasks using tools.\n\n"
         "You MUST use tools for every action. NEVER give instructions.\n\n"
@@ -87,7 +87,7 @@ class ResearchAgent(BaseAgent):
     name = "researcher"
     role = "web search, deep research, API calls, reading documentation, synthesizing findings"
     model_key = "general"
-    max_tool_steps = 8
+    max_tool_steps = 15  # Expanded for deep research chains (was 8)
     system_prompt = (
         "You are a research agent that EXECUTES searches using tools.\n\n"
         "You MUST use tools. NEVER say 'you can search for' — YOU do the searching.\n\n"

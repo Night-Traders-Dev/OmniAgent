@@ -239,6 +239,15 @@ class BaseAgent:
         total_tokens = 0
 
         for step in range(self.max_tool_steps):
+            # Context compression: after 15 steps, summarize older messages to prevent context overflow
+            if step > 0 and step % 15 == 0 and len(messages) > 20:
+                try:
+                    from src.task_engine import compress_context
+                    messages = [messages[0]] + compress_context(messages[1:], max_keep=12)
+                    state.progress_log.append(f"[{datetime.now().strftime('%H:%M:%S')}]   [{self.name}] context compressed at step {step}")
+                except Exception:
+                    pass
+
             try:
                 response = await loop.run_in_executor(
                     None,

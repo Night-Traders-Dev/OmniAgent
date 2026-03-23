@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>OmniAgent v8.1</title>
+    <title>OmniAgent v8.2</title>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
     <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
@@ -291,8 +291,9 @@
     <div id="header">
         <div id="header-left">
             <button class="hamburger-left" onclick="toggleSidebar()" title="Chat history">&#x1F4AC;</button>
-            <div><div id="header-title">OmniAgent v8.1</div><div id="header-status">Idle</div></div>
+            <div><div id="header-title">OmniAgent v8.2</div><div id="header-status">Idle</div></div>
             <div id="gpu">--</div>
+            <button onclick="toggleTheme()" style="background:none;border:1px solid var(--border);border-radius:6px;width:32px;height:32px;cursor:pointer;font-size:1rem;color:var(--text)" title="Toggle theme">&#x263C;</button>
         </div>
         <button id="hamburger" onclick="toggleMenu()"><span></span><span></span><span></span></button>
     </div>
@@ -436,6 +437,7 @@
         <div class="menu-section">
             <h4>History</h4>
             <button class="menu-btn" style="margin:0 0 6px;width:100%" onclick="showReasoningHistory()">Reasoning / Thinking Log</button>
+            <button class="menu-btn" style="margin:0 0 6px;width:100%" onclick="showTaskHistory()">Long-Running Tasks</button>
             <h4>About</h4>
             <div style="display:flex;gap:6px">
                 <button class="menu-btn" style="flex:1;margin:0" onclick="showChangelog()">Changelog</button>
@@ -1596,6 +1598,98 @@
         }
 
         // --- Code Intelligence ---
+        async function showTaskHistory() {
+            const modal = document.getElementById('changelog-modal');
+            const content = document.getElementById('changelog-content');
+            content.innerHTML = '<p style="color:var(--dim)">Loading tasks...</p>';
+            modal.style.display = 'block';
+            try {
+                const r = await fetch(`/api/tasks/list?session_id=${sessionId}`);
+                const d = await r.json();
+                let html = '<h2 style="color:var(--accent);margin:0 0 12px">Long-Running Tasks</h2>';
+                if (!d.tasks || d.tasks.length === 0) {
+                    html += '<p style="color:var(--dim)">No tasks yet. Complex requests are automatically broken into multi-phase tasks.</p>';
+                } else {
+                    html += '<div style="display:flex;flex-direction:column;gap:8px">';
+                    d.tasks.forEach(t => {
+                        const statusColors = {completed:'var(--green)',running:'var(--accent)',paused:'#FFB74D',failed:'var(--red)',pending:'var(--dim)',cancelled:'var(--dim)'};
+                        const color = statusColors[t.status] || 'var(--dim)';
+                        html += `<div style="border:1px solid var(--border);border-radius:8px;padding:10px">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <b style="color:var(--text);font-size:.85rem">${t.title||'Untitled'}</b>
+                                <span style="color:${color};font-size:.75rem;text-transform:uppercase">${t.status}</span>
+                            </div>
+                            <div style="font-size:.72rem;color:var(--dim);margin-top:4px">
+                                Phase ${t.current_phase||0}/${t.total_phases||0} · Created ${t.created_at||''}
+                            </div>
+                            <div style="display:flex;gap:6px;margin-top:6px">
+                                ${t.status==='paused'?'<button class="menu-btn green" style="margin:0;padding:2px 10px;font-size:.7rem" onclick="resumeTask(\''+t.id+'\')">Resume</button>':''}
+                                ${t.status!=='completed'&&t.status!=='cancelled'?'<button class="menu-btn" style="margin:0;padding:2px 10px;font-size:.7rem;border-color:var(--red);color:var(--red)" onclick="rollbackTask(\''+t.id+'\')">Rollback</button>':''}
+                                <button class="menu-btn" style="margin:0;padding:2px 10px;font-size:.7rem" onclick="viewTaskDetail(\''+t.id+'\')">Details</button>
+                            </div>
+                        </div>`;
+                    });
+                    html += '</div>';
+                }
+                content.innerHTML = html;
+            } catch(e) { content.innerHTML = '<p style="color:var(--red)">Failed: '+e.message+'</p>'; }
+        }
+
+        async function resumeTask(taskId) {
+            showToast('Resuming task...');
+            try {
+                const r = await fetch('/api/tasks/resume', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId,session_id:sessionId})});
+                const d = await r.json();
+                showToast(d.status==='completed'?'Task completed!':d.status==='paused'?'Paused for approval':'Running...');
+                showTaskHistory();
+            } catch(e) { showToast('Resume failed'); }
+        }
+
+        async function rollbackTask(taskId) {
+            if (!confirm('Rollback all changes from this task?')) return;
+            try {
+                const r = await fetch('/api/tasks/rollback', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task_id:taskId})});
+                const d = await r.json();
+                showToast(d.result||'Rolled back');
+                showTaskHistory();
+            } catch(e) { showToast('Rollback failed'); }
+        }
+
+        async function viewTaskDetail(taskId) {
+            try {
+                const r = await fetch(`/api/tasks/detail/${taskId}`);
+                const t = await r.json();
+                const content = document.getElementById('changelog-content');
+                let html = `<h2 style="color:var(--accent)">${t.title||taskId}</h2>`;
+                html += `<p style="color:var(--dim);font-size:.8rem">${t.description||''}</p>`;
+                html += `<p style="color:var(--text);font-size:.8rem">Status: <b>${t.status}</b> · Phase ${t.current_phase||0}/${t.total_phases||0}</p>`;
+                if (t.git_branch) html += `<p style="font-size:.75rem;color:var(--dim)">Branch: ${t.git_branch}</p>`;
+                // Phases
+                html += '<h3 style="color:var(--accent);margin-top:16px">Phases</h3>';
+                (t.phases||[]).forEach((p,i) => {
+                    const colors = {completed:'var(--green)',running:'var(--accent)',failed:'var(--red)',pending:'var(--dim)'};
+                    html += `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+                        <span style="color:${colors[p.status]||'var(--dim)'}">${i+1}. ${p.name} (${p.agent}) — ${p.status}</span>
+                        <div style="font-size:.72rem;color:var(--dim)">${p.description||''}</div>
+                        ${p.result_summary?'<div style="font-size:.72rem;color:var(--text);margin-top:2px">'+p.result_summary.substring(0,200)+'</div>':''}
+                    </div>`;
+                });
+                // File manifest
+                if (t.file_manifest && t.file_manifest.length > 0) {
+                    html += '<h3 style="color:var(--accent);margin-top:16px">Files Modified</h3>';
+                    t.file_manifest.forEach(f => { html += `<div style="font-size:.75rem;color:var(--text);font-family:monospace">${f.action}: ${f.path}</div>`; });
+                }
+                // Progress log
+                if (t.progress_log && t.progress_log.length > 0) {
+                    html += '<h3 style="color:var(--accent);margin-top:16px">Log</h3>';
+                    html += '<div style="font-size:.72rem;font-family:monospace;max-height:200px;overflow-y:auto">';
+                    t.progress_log.forEach(e => { html += `<div style="color:var(--dim)">${e}</div>`; });
+                    html += '</div>';
+                }
+                content.innerHTML = html;
+            } catch(e) { showToast('Failed to load details'); }
+        }
+
         async function showReasoningHistory() {
             const modal = document.getElementById('changelog-modal');
             const content = document.getElementById('changelog-content');
@@ -1893,6 +1987,52 @@
                 {enableHighAccuracy: false, timeout: 10000}
             );
         }
+
+        // --- Paste Image Inline ---
+        document.getElementById('msg').addEventListener('paste', (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const file = item.getAsFile();
+                    if (!file) return;
+                    const formData = new FormData();
+                    formData.append('file', file, `paste_${Date.now()}.png`);
+                    showToast('Uploading pasted image...');
+                    fetch('/api/upload', {method:'POST', body:formData})
+                        .then(r=>r.json()).then(d=>{
+                            if(d.ok){
+                                const el=document.getElementById('msg');
+                                el.value+=(el.value?' ':'')+`[image:${d.path}] Analyze this image`;
+                                showToast('Image pasted — press Enter to analyze');
+                            }
+                        }).catch(()=>showToast('Upload failed'));
+                    break;
+                }
+            }
+        });
+
+        // --- Theme Toggle ---
+        let darkMode = localStorage.getItem('omni-theme') !== 'light';
+        function toggleTheme() {
+            darkMode = !darkMode;
+            localStorage.setItem('omni-theme', darkMode ? 'dark' : 'light');
+            applyTheme();
+        }
+        function applyTheme() {
+            const root = document.documentElement;
+            if (darkMode) {
+                root.style.setProperty('--bg','#0d1117'); root.style.setProperty('--card','#161b22');
+                root.style.setProperty('--border','#30363d'); root.style.setProperty('--text','#e6edf3');
+                root.style.setProperty('--dim','#8b949e');
+            } else {
+                root.style.setProperty('--bg','#ffffff'); root.style.setProperty('--card','#f6f8fa');
+                root.style.setProperty('--border','#d0d7de'); root.style.setProperty('--text','#1f2328');
+                root.style.setProperty('--dim','#656d76');
+            }
+        }
+        applyTheme();
 
         // --- Drag & Drop File Upload ---
         const chatEl = document.getElementById('chat');

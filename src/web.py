@@ -32,7 +32,14 @@ async def lifespan(application):
     yield
     task.cancel()
 
-app = FastAPI(title="OmniAgent", lifespan=lifespan)
+app = FastAPI(
+    title="OmniAgent",
+    version="8.2.0",
+    description="Autonomous AI Agent Framework — Local LLM orchestration with 46 tools, 7 agents, multi-phase task execution",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 
 # Rate limiting
 limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
@@ -111,7 +118,9 @@ async def register(request: Request, req: AuthReq):
         return JSONResponse({"error": "Password must be at least 6 characters"}, status_code=400)
     if not all(c.isalnum() or c in '_-.' for c in req.username):
         return JSONResponse({"error": "Username must be alphanumeric (with _-. allowed)"}, status_code=400)
-    user = create_user(req.username, req.password)
+    import asyncio
+    loop = asyncio.get_event_loop()
+    user = await loop.run_in_executor(None, create_user, req.username, req.password)
     if not user:
         return JSONResponse({"error": "Username already taken"}, status_code=400)
     sid = create_session(user["id"])
@@ -123,7 +132,9 @@ async def login(request: Request, req: AuthReq):
     from src.upgrades import check_login_lockout, record_failed_login, clear_login_attempts, audit_log
     if check_login_lockout(req.username):
         return JSONResponse({"error": "Account locked — too many failed attempts. Try again in 5 minutes."}, status_code=429)
-    user = authenticate_user(req.username, req.password)
+    import asyncio
+    loop = asyncio.get_event_loop()
+    user = await loop.run_in_executor(None, authenticate_user, req.username, req.password)
     if not user:
         record_failed_login(req.username)
         audit_log("", "login_failed", f"username={req.username}")
@@ -696,9 +707,31 @@ async def _process_chat(request: Request, req: ChatReq, sid: str):
     memory_context = ""
     user = get_session_user(sid)
     if user:
+        # Inject pinned messages
+        try:
+            from src.features import get_pinned_context
+            pins_ctx = get_pinned_context(sid)
+            if pins_ctx:
+                memory_context += pins_ctx + "\n\n"
+        except Exception:
+            pass
+        # Inject user preferences
+        try:
+            from src.features import get_preference_context
+            prefs_ctx = get_preference_context(user["id"])
+            if prefs_ctx:
+                memory_context += prefs_ctx + "\n\n"
+        except Exception:
+            pass
+        # Learn from corrections
+        try:
+            from src.features import learn_from_correction
+            learn_from_correction(user["id"], req.message)
+        except Exception:
+            pass
         try:
             from src.memory import recall_as_context
-            memory_context = recall_as_context(user["id"])
+            memory_context += recall_as_context(user["id"])
         except Exception:
             pass
 
@@ -1470,6 +1503,277 @@ from src.advanced import (
 )
 
 # --- Multimodal Capabilities ---
+
+# --- Long-Running Tasks ---
+
+class TaskCreateReq(BaseModel):
+    description: str
+    session_id: str = ""
+
+class TaskApproveReq(BaseModel):
+    task_id: str
+    session_id: str = ""
+
+class QueueReq(BaseModel):
+    description: str
+    priority: int = 1
+    session_id: str = ""
+
+@app.post("/api/tasks/plan")
+async def api_plan_task(req: TaskCreateReq):
+    """Plan a complex task into phases."""
+    from src.task_engine import plan_long_task
+    sid = req.session_id or "default"
+    result = await plan_long_task(req.description, sid)
+    return JSONResponse(result)
+
+@app.post("/api/tasks/execute")
+async def api_execute_task(req: TaskApproveReq):
+    """Execute or resume a planned task."""
+    from src.task_engine import execute_task
+    result = await execute_task(req.task_id, req.session_id or "default")
+    return JSONResponse(result)
+
+@app.post("/api/tasks/resume")
+async def api_resume_task(req: TaskApproveReq):
+    """Resume a paused task (approve and continue)."""
+    from src.task_engine import resume_task
+    result = await resume_task(req.task_id, req.session_id or "default")
+    return JSONResponse(result)
+
+@app.get("/api/tasks/list")
+async def api_list_tasks(session_id: str = "default", status: str = ""):
+    """List all tasks for a session."""
+    from src.task_engine import list_tasks
+    return JSONResponse({"tasks": list_tasks(session_id, status)})
+
+@app.get("/api/tasks/detail/{task_id}")
+async def api_task_detail(task_id: str):
+    """Get full task details including phases, checkpoints, manifest."""
+    from src.task_engine import get_task
+    task = get_task(task_id)
+    if not task:
+        return JSONResponse({"error": "Task not found"}, status_code=404)
+    return JSONResponse(task)
+
+@app.post("/api/tasks/rollback")
+async def api_rollback_task(req: TaskApproveReq):
+    """Rollback all changes made by a task."""
+    from src.task_engine import rollback_task
+    result = rollback_task(req.task_id)
+    return JSONResponse({"result": result})
+
+@app.get("/api/tasks/diff/{task_id}")
+async def api_task_diff(task_id: str):
+    """Get a diff summary of task changes."""
+    from src.task_engine import get_task_diff
+    return JSONResponse({"diff": get_task_diff(task_id)})
+
+@app.post("/api/tasks/queue")
+async def api_enqueue(req: QueueReq):
+    """Add a task to the queue."""
+    from src.task_engine import enqueue_task
+    sid = req.session_id or "default"
+    pos = enqueue_task(sid, req.description, req.priority)
+    return JSONResponse({"ok": True, "position": pos})
+
+@app.get("/api/tasks/queue")
+async def api_get_queue(session_id: str = "default"):
+    """Get the task queue."""
+    from src.task_engine import get_queue
+    return JSONResponse({"queue": get_queue(session_id)})
+
+@app.post("/api/tasks/queue/process")
+async def api_process_queue(session_id: str = "default"):
+    """Start processing the task queue."""
+    from src.task_engine import process_queue
+    asyncio.create_task(process_queue(session_id))
+    return JSONResponse({"ok": True, "message": "Queue processing started"})
+
+
+# --- Conversation Search (cross-session) ---
+
+@app.get("/api/search/global")
+async def global_search(q: str = "", session_id: str = "default"):
+    """Search across ALL conversations for the user."""
+    from src.features import search_all_conversations
+    user = get_session_user(session_id)
+    if not user:
+        return JSONResponse({"results": []})
+    results = search_all_conversations(user["id"], q)
+    return JSONResponse({"results": results, "query": q})
+
+
+# --- Pinned Messages ---
+
+class PinReq(BaseModel):
+    session_id: str
+    message_index: int
+    content: str
+    role: str = "assistant"
+    note: str = ""
+
+@app.post("/api/pins")
+async def api_pin_message(req: PinReq):
+    from src.features import pin_message
+    pin_message(req.session_id, req.message_index, req.content, req.role, req.note)
+    return JSONResponse({"ok": True})
+
+@app.get("/api/pins")
+async def api_get_pins(session_id: str = "default"):
+    from src.features import get_pinned_messages
+    return JSONResponse({"pins": get_pinned_messages(session_id)})
+
+@app.delete("/api/pins/{pin_id}")
+async def api_unpin(pin_id: int):
+    from src.features import unpin_message
+    unpin_message(pin_id)
+    return JSONResponse({"ok": True})
+
+
+# --- Scheduled Tasks ---
+
+class ScheduleReq(BaseModel):
+    session_id: str = "default"
+    description: str
+    interval: str = "daily"  # "hourly", "daily", "weekly", "30m", "6h", "2d"
+
+@app.post("/api/schedules")
+async def api_create_schedule(req: ScheduleReq):
+    from src.features import create_schedule
+    sid = create_schedule(req.session_id, req.description, req.interval)
+    return JSONResponse({"ok": True, "schedule_id": sid})
+
+@app.get("/api/schedules")
+async def api_list_schedules(session_id: str = "default"):
+    from src.features import list_schedules
+    return JSONResponse({"schedules": list_schedules(session_id)})
+
+@app.delete("/api/schedules/{schedule_id}")
+async def api_delete_schedule(schedule_id: int):
+    from src.features import delete_schedule
+    delete_schedule(schedule_id)
+    return JSONResponse({"ok": True})
+
+
+# --- User Preferences ---
+
+@app.get("/api/preferences")
+async def api_get_preferences(session_id: str = "default"):
+    from src.features import get_preferences
+    user = get_session_user(session_id)
+    if not user:
+        return JSONResponse({"preferences": []})
+    return JSONResponse({"preferences": get_preferences(user["id"])})
+
+class PrefReq(BaseModel):
+    session_id: str = "default"
+    category: str
+    key: str
+    value: str
+
+@app.post("/api/preferences")
+async def api_set_preference(req: PrefReq):
+    from src.features import set_preference
+    user = get_session_user(req.session_id)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    set_preference(user["id"], req.category, req.key, req.value)
+    return JSONResponse({"ok": True})
+
+
+# --- PDF Export ---
+
+@app.get("/api/export/pdf")
+async def export_pdf(session_id: str = ""):
+    from src.features import export_chat_pdf
+    history = get_chat_history(session_id) if session_id else state.chat_history
+    pdf_bytes = export_chat_pdf(history, title=f"OmniAgent Chat — {session_id[:8] if session_id else 'default'}")
+    from starlette.responses import Response
+    return Response(content=pdf_bytes, media_type="text/html",
+                   headers={"Content-Disposition": "attachment; filename=omni_chat_export.html"})
+
+
+# --- Auto Model Selection ---
+
+@app.get("/api/models/benchmark")
+async def api_benchmark_models():
+    """Benchmark installed models for auto-selection."""
+    from src.platform import benchmark_models
+    results = await benchmark_models()
+    return JSONResponse({"benchmarks": results})
+
+@app.get("/api/models/best")
+async def api_best_model(role: str = "coding"):
+    from src.platform import get_best_model
+    model = get_best_model(role)
+    return JSONResponse({"role": role, "recommended": model})
+
+
+# --- Sandboxed Execution ---
+
+class SandboxReq(BaseModel):
+    code: str
+    language: str = "python"
+    timeout: int = 30
+
+@app.post("/api/sandbox/run")
+async def api_sandbox_run(req: SandboxReq):
+    from src.platform import run_sandboxed
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_sandboxed, req.code, req.language, req.timeout)
+    return JSONResponse(result)
+
+
+# --- WebSocket Collaboration ---
+
+from fastapi import WebSocket
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    await websocket.accept()
+    from src.platform import ws_handler
+    await ws_handler(websocket, session_id)
+
+
+# --- MCP Server ---
+
+@app.get("/mcp/manifest")
+async def mcp_manifest():
+    from src.platform import mcp_server
+    return JSONResponse(mcp_server.get_manifest())
+
+class MCPToolReq(BaseModel):
+    tool: str
+    args: dict = {}
+
+@app.post("/mcp/execute")
+async def mcp_execute(req: MCPToolReq):
+    from src.platform import mcp_server
+    result = mcp_server.execute_tool(req.tool, req.args)
+    return JSONResponse(result)
+
+
+# --- Notification Config ---
+
+class NotifyConfigReq(BaseModel):
+    discord_webhook: str = ""
+    slack_webhook: str = ""
+
+@app.post("/api/notifications/config")
+async def set_notification_config(req: NotifyConfigReq):
+    if req.discord_webhook:
+        os.environ["DISCORD_WEBHOOK_URL"] = req.discord_webhook
+    if req.slack_webhook:
+        os.environ["SLACK_WEBHOOK_URL"] = req.slack_webhook
+    return JSONResponse({"ok": True})
+
+@app.get("/api/notifications/test")
+async def test_notifications():
+    from src.platform import notify_task_complete
+    notify_task_complete("test", "This is a test notification from OmniAgent")
+    return JSONResponse({"ok": True})
+
 
 # --- Reasoning / Thinking History ---
 

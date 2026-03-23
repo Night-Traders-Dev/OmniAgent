@@ -423,6 +423,14 @@ def main():
     except Exception as e:
         logger.debug(f"[Upgrades] Init error: {e}")
 
+    # Start scheduled task runner
+    try:
+        from src.features import start_scheduler
+        start_scheduler()
+        logger.info("[Scheduler] Task scheduler started")
+    except Exception as e:
+        logger.debug(f"[Scheduler] Init error: {e}")
+
     # Start services
     start_bitnet()
 

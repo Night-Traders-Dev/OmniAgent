@@ -1,0 +1,41 @@
+name: OmniAgent CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Lint
+        run: python -m py_compile src/web.py src/tools.py src/persistence.py src/agents/orchestrator.py src/agents/base.py
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: omniagent-debug.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk

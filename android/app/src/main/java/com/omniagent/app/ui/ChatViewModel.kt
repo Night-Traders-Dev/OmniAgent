@@ -1165,6 +1165,35 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Task History ---
+
+    fun loadTaskHistory() {
+        viewModelScope.launch {
+            try {
+                val r = okhttp3.Request.Builder().url("${api.baseUrl}/api/tasks/list?session_id=${api.sessionId}").build()
+                val resp = okhttp3.OkHttpClient.Builder().build().newCall(r).execute()
+                val body = resp.body?.string() ?: "{}"
+                val obj = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                val tasks = obj.getAsJsonArray("tasks")
+                val lines = mutableListOf<String>()
+                if (tasks != null && tasks.size() > 0) {
+                    for (i in 0 until tasks.size()) {
+                        val t = tasks.get(i).asJsonObject
+                        val title = t.get("title")?.asString ?: "Untitled"
+                        val status = t.get("status")?.asString ?: "?"
+                        val phase = t.get("current_phase")?.asInt ?: 0
+                        val total = t.get("total_phases")?.asInt ?: 0
+                        val created = t.get("created_at")?.asString ?: ""
+                        lines.add("[$status] $title — Phase $phase/$total ($created)")
+                    }
+                } else {
+                    lines.add("No tasks yet. Complex requests are automatically broken into multi-phase tasks.")
+                }
+                _state.update { s -> s.copy(reasoningHistory = lines, showReasoningHistory = true) }
+            } catch (_: Exception) {}
+        }
+    }
+
     // --- Reasoning History ---
 
     fun loadReasoningHistory() {
