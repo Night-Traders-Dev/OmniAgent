@@ -317,7 +317,7 @@ fun AssistantBubble(msg: UiMessage, context: Context, vm: ChatViewModel? = null,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
                         }
                     }
-                    MarkdownText(msg.content, context)
+                    MarkdownText(msg.content, context, vm?.api?.baseUrl ?: "", vm?.api?.sessionId ?: "")
                     if (msg.isStreaming)
                         Text("|", color = Accent, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }

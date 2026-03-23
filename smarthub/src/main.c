@@ -1175,11 +1175,11 @@ static void draw_metrics_widget(int x, int y, int w) {
     draw_metric_row(mx, row, mw, "Commands Run", buf, COL_TEXT);
     row += rh;
 
-    snprintf(buf, sizeof(buf), "%,d", metrics.tokens_in);
+    snprintf(buf, sizeof(buf), "%d", metrics.tokens_in);
     draw_metric_row(mx, row, mw, "Tokens In", buf, COL_ACCENT);
     row += rh;
 
-    snprintf(buf, sizeof(buf), "%,d", metrics.tokens_out);
+    snprintf(buf, sizeof(buf), "%d", metrics.tokens_out);
     draw_metric_row(mx, row, mw, "Tokens Out", buf, COL_ACCENT);
     row += rh;
 

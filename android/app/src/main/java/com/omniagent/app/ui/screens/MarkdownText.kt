@@ -40,7 +40,12 @@ import com.omniagent.app.ui.theme.*
  * - > blockquotes
  */
 @Composable
-fun MarkdownText(text: String, context: Context = LocalContext.current) {
+fun MarkdownText(
+    text: String,
+    context: Context = LocalContext.current,
+    serverBaseUrl: String = "",
+    sessionId: String = "",
+) {
     val blocks = parseMarkdownBlocks(text)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         for (block in blocks) {
@@ -49,7 +54,7 @@ fun MarkdownText(text: String, context: Context = LocalContext.current) {
                 is MdBlock.Header -> HeaderView(block.level, block.text, context)
                 is MdBlock.Blockquote -> BlockquoteView(block.text, context)
                 is MdBlock.ListItem -> ListItemView(block.text, block.ordered, block.index, context)
-                is MdBlock.MediaBlock -> MediaCardView(block.url, block.name, block.type, context)
+                is MdBlock.MediaBlock -> MediaCardView(block.url, block.name, block.type, context, serverBaseUrl, sessionId)
                 is MdBlock.WeatherCard -> WeatherCardView(block)
                 is MdBlock.ErrorCard -> ErrorCardView(block)
                 is MdBlock.FileCard -> FileCardView(block)
@@ -492,11 +497,26 @@ fun mediaTypeFromExt(filename: String): String {
     }
 }
 
+private fun resolveMediaUrl(url: String, serverBaseUrl: String, sessionId: String): String {
+    val base = serverBaseUrl.trimEnd('/')
+    val resolved = if (url.startsWith("/uploads/") && base.isNotEmpty()) "$base$url" else url
+    if (!resolved.contains("/uploads/") || sessionId.isBlank()) return resolved
+    val separator = if (resolved.contains("?")) "&" else "?"
+    return resolved + separator + "session_id=" + Uri.encode(sessionId)
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MediaCardView(url: String, name: String, mediaType: String, context: Context) {
+fun MediaCardView(
+    url: String,
+    name: String,
+    mediaType: String,
+    context: Context,
+    serverBaseUrl: String,
+    sessionId: String,
+) {
     var showMenu by remember { mutableStateOf(false) }
-    val fullUrl = url // relative — resolved by caller if needed
+    val fullUrl = resolveMediaUrl(url, serverBaseUrl, sessionId)
 
     Box {
         Surface(

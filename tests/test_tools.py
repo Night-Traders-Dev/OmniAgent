@@ -75,6 +75,9 @@ class TestRunShell:
         assert "DANGEROUS" in run_shell("rm -rf /") or "BLOCKED" in run_shell("rm -rf /")
     def test_dangerous(self):
         assert "DANGEROUS" in run_shell("dd if=/dev/zero of=/dev/sda")
+    def test_blocks_shell_control_operators(self):
+        result = run_shell("echo hello && python -c 'print(42)'")
+        assert "single command only" in result.lower()
 
 class TestDangerousCommand:
     def test_rm_rf_root(self): assert is_dangerous_command("rm -rf /") is not None

@@ -213,10 +213,10 @@ class TestPersistence:
         assert history[-2]["content"] == "hello"
         assert history[-1]["content"] == "hi there"
 
-    def test_bcrypt_hashing(self):
+    def test_password_hashing(self):
         from src.persistence import hash_password, verify_password
         h = hash_password("mypassword")
-        assert h.startswith("bcrypt:")
+        assert h.startswith("pbkdf2:")
         assert verify_password("mypassword", h)
         assert not verify_password("wrong", h)
 

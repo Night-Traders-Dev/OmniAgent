@@ -2,9 +2,11 @@ import json
 import asyncio
 import tempfile
 import os
+import mimetypes
+import re
 from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, PlainTextResponse, FileResponse
 from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -57,7 +59,6 @@ _CORS_ORIGINS = [
     "http://localhost:3000", "http://127.0.0.1:3000",
 ]
 # Dynamically allow the tunnel origin if one is active
-import re as _cors_re
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$|^https://.*\.trycloudflare\.com$",
@@ -84,6 +85,16 @@ orchestrator = Orchestrator()
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "index.html"
 UPLOAD_DIR = Path(__file__).resolve().parent.parent / "uploads"
 UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_NAME_RE = re.compile(r"^[a-zA-Z0-9_\-]+\.[A-Za-z0-9]+$")
+
+
+def _resolve_upload_path(filename: str) -> Path | None:
+    if not UPLOAD_NAME_RE.match(filename):
+        return None
+    filepath = (UPLOAD_DIR / filename).resolve()
+    if filepath.parent != UPLOAD_DIR.resolve():
+        return None
+    return filepath
 
 
 @app.get("/")
@@ -100,6 +111,7 @@ from src.persistence import (
     save_message, get_chat_history, clear_chat_history, list_user_sessions,
     rename_session, delete_session, share_session,
     add_collaborator, remove_collaborator, get_session_collaborators, can_access_session,
+    is_session_owner,
     archive_session, unarchive_session, save_session_metrics, get_session_metrics,
     get_last_session, save_global_counters, load_global_counters,
 )
@@ -140,6 +152,43 @@ def _create_invite_code() -> str:
     conn.commit()
     return code
 
+
+def _user_is_admin(user: dict | None) -> bool:
+    return bool(user and user.get("is_admin") in (1, "1", True))
+
+
+def _require_authenticated(session_id: str) -> tuple[dict | None, JSONResponse | None]:
+    user = get_session_user(session_id)
+    if not user:
+        return None, JSONResponse({"error": "Authentication required"}, status_code=401)
+    return user, None
+
+
+def _require_admin(session_id: str) -> tuple[dict | None, JSONResponse | None]:
+    user, error = _require_authenticated(session_id)
+    if error:
+        return None, error
+    if not _user_is_admin(user):
+        return None, JSONResponse({"error": "Admin access required"}, status_code=403)
+    return user, None
+
+
+def _require_session_access(
+    session_id: str,
+    target_session: str,
+    *,
+    owner_only: bool = False,
+) -> tuple[dict | None, JSONResponse | None]:
+    user, error = _require_authenticated(session_id)
+    if error:
+        return None, error
+    if _user_is_admin(user):
+        return user, None
+    allowed = is_session_owner(target_session, user["id"]) if owner_only else can_access_session(target_session, user["id"])
+    if not allowed:
+        return None, JSONResponse({"error": "Access denied"}, status_code=403)
+    return user, None
+
 @app.post("/api/auth/register")
 @limiter.limit("5/minute")
 async def register(request: Request, req: AuthReq):
@@ -166,18 +215,18 @@ async def register(request: Request, req: AuthReq):
 @limiter.limit("3/minute")
 async def generate_invite(request: Request, session_id: str = ""):
     """Generate a new invite code. Requires authenticated session."""
-    user = get_session_user(session_id)
-    if not user:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    user, error = _require_admin(session_id)
+    if error:
+        return error
     code = _create_invite_code()
     return JSONResponse({"invite_code": code})
 
 @app.get("/api/auth/invite/list")
 async def list_invites(session_id: str = ""):
     """List all active invite codes. Requires authenticated session."""
-    user = get_session_user(session_id)
-    if not user:
-        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    user, error = _require_admin(session_id)
+    if error:
+        return error
     codes = list(_get_valid_invite_codes())
     return JSONResponse({"codes": codes})
 
@@ -274,9 +323,9 @@ class RenameReq(BaseModel):
 
 @app.post("/api/auth/sessions/rename")
 async def rename_chat(req: RenameReq):
-    user = get_session_user(req.session_id)
-    if not user or not can_access_session(req.target_session, user["id"]):
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     rename_session(req.target_session, req.title)
     return JSONResponse({"ok": True})
 
@@ -286,9 +335,9 @@ class DeleteReq(BaseModel):
 
 @app.post("/api/auth/sessions/delete")
 async def delete_chat(req: DeleteReq):
-    user = get_session_user(req.session_id)
-    if not user or not can_access_session(req.target_session, user["id"]):
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     delete_session(req.target_session)
     return JSONResponse({"ok": True})
 
@@ -298,17 +347,17 @@ class ArchiveReq(BaseModel):
 
 @app.post("/api/auth/sessions/archive")
 async def archive_chat(req: ArchiveReq):
-    user = get_session_user(req.session_id)
-    if not user or not can_access_session(req.target_session, user["id"]):
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     archive_session(req.target_session)
     return JSONResponse({"ok": True})
 
 @app.post("/api/auth/sessions/unarchive")
 async def unarchive_chat(req: ArchiveReq):
-    user = get_session_user(req.session_id)
-    if not user or not can_access_session(req.target_session, user["id"]):
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     unarchive_session(req.target_session)
     return JSONResponse({"ok": True})
 
@@ -359,17 +408,17 @@ class CollabReq(BaseModel):
 
 @app.post("/api/collab/share")
 async def share_chat(req: CollabReq):
-    user = get_session_user(req.session_id)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     share_session(req.target_session)
     return JSONResponse({"ok": True, "share_id": req.target_session})
 
 @app.post("/api/collab/invite")
 async def invite_collaborator(req: CollabReq):
-    user = get_session_user(req.session_id)
-    if not user or not can_access_session(req.target_session, user["id"]):
-        return JSONResponse({"error": "Access denied"}, status_code=403)
+    user, error = _require_session_access(req.session_id, req.target_session, owner_only=True)
+    if error:
+        return error
     if not req.username:
         return JSONResponse({"error": "Username required"}, status_code=400)
     ok = add_collaborator(req.target_session, req.username)
@@ -399,17 +448,17 @@ async def save_metrics(req: SessionMetricsReq):
 
 @app.get("/api/auth/sessions/metrics")
 async def get_metrics_for_session(session_id: str, target_session: str):
-    user = get_session_user(session_id)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user, error = _require_session_access(session_id, target_session)
+    if error:
+        return error
     metrics = get_session_metrics(target_session)
     return JSONResponse({"metrics": metrics or {}})
 
 @app.get("/api/collab/members")
 async def get_collab_members(session_id: str, target_session: str):
-    user = get_session_user(session_id)
-    if not user:
-        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    user, error = _require_session_access(session_id, target_session)
+    if error:
+        return error
     members = get_session_collaborators(target_session)
     return JSONResponse({"members": members})
 
@@ -957,7 +1006,10 @@ MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
 @app.post("/api/upload")
 @limiter.limit("10/minute")
-async def upload_file(request: Request, file: UploadFile = File(...)):
+async def upload_file(request: Request, file: UploadFile = File(...), session_id: str = Form("")):
+    user, error = _require_authenticated(session_id)
+    if error:
+        return error
     # Check upload directory size limit
     from src.upgrades import check_upload_dir_size
     if not check_upload_dir_size():
@@ -979,6 +1031,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
         "path": str(dest),
         "filename": safe_name,
         "size": len(content),
+        "url": f"/uploads/{safe_name}",
     })
 
 
@@ -1197,13 +1250,22 @@ async def list_tools():
 from src.plugins import list_plugins, reload_plugins as _reload_plugins
 
 @app.get("/api/plugins")
-async def api_list_plugins():
+async def api_list_plugins(session_id: str = ""):
     """List all currently loaded user plugins."""
+    user, error = _require_admin(session_id)
+    if error:
+        return error
     return JSONResponse({"plugins": list_plugins()})
 
+class PluginReloadReq(BaseModel):
+    session_id: str
+
 @app.post("/api/plugins/reload")
-async def api_reload_plugins():
+async def api_reload_plugins(req: PluginReloadReq):
     """Unload all plugins and re-scan ~/.omniagent/tools/."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     try:
         loaded = _reload_plugins()
         return JSONResponse({"ok": True, "loaded": loaded, "count": len(loaded)})
@@ -1354,10 +1416,14 @@ class OAuthConfigReq(BaseModel):
     service: str  # "github" or "google"
     client_id: str
     client_secret: str
+    session_id: str
 
 @app.post("/api/oauth/config")
 async def set_oauth_config(req: OAuthConfigReq):
     """Save OAuth client credentials (one-time setup per service)."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     if req.service not in ("github", "google"):
         return JSONResponse({"error": "Service must be 'github' or 'google'"}, status_code=400)
     if not req.client_id or not req.client_secret:
@@ -1840,10 +1906,19 @@ def _get_mcp_handler():
         _mcp_handler = MCPProtocolHandler()
     return _mcp_handler
 
+
+def _get_request_session_id(request: Request) -> str:
+    return request.headers.get("X-Session-ID", "") or request.query_params.get("session_id", "")
+
 @app.post("/mcp")
 async def mcp_jsonrpc(request: Request):
     """MCP JSON-RPC 2.0 endpoint — handles all MCP methods over HTTP.
     Clients POST JSON-RPC messages here (initialize, tools/list, tools/call, etc.)."""
+    session_id = _get_request_session_id(request)
+    user, error = _require_authenticated(session_id)
+    if error:
+        return error
+    state.set_active_session(session_id)
     try:
         body = await request.json()
     except Exception:
@@ -1867,10 +1942,14 @@ async def mcp_jsonrpc(request: Request):
 @app.get("/mcp/sse")
 async def mcp_sse_stream(request: Request):
     """MCP SSE transport — server pushes events, client sends via POST /mcp."""
+    session_id = _get_request_session_id(request)
+    user, error = _require_authenticated(session_id)
+    if error:
+        return error
     from src.mcp import SERVER_INFO, SERVER_CAPABILITIES
     async def event_stream():
         # Send endpoint URL for client to POST to
-        yield f"event: endpoint\ndata: /mcp\n\n"
+        yield f"event: endpoint\ndata: /mcp?session_id={session_id}\n\n"
         # Keep connection alive
         while True:
             await asyncio.sleep(15)
@@ -1879,8 +1958,11 @@ async def mcp_sse_stream(request: Request):
 
 # Legacy REST endpoints (preserved for backward compatibility)
 @app.get("/mcp/manifest")
-async def mcp_manifest():
+async def mcp_manifest(session_id: str = ""):
     """Legacy: GET the tool manifest. Prefer POST /mcp with tools/list."""
+    user, error = _require_authenticated(session_id)
+    if error:
+        return error
     handler = _get_mcp_handler()
     result = handler._handle_tools_list({})
     from src.mcp import SERVER_INFO
@@ -1890,10 +1972,15 @@ async def mcp_manifest():
 class MCPToolReq(BaseModel):
     tool: str
     args: dict = {}
+    session_id: str
 
 @app.post("/mcp/execute")
 async def mcp_execute(req: MCPToolReq):
     """Legacy: Execute a tool. Prefer POST /mcp with tools/call."""
+    user, error = _require_authenticated(req.session_id)
+    if error:
+        return error
+    state.set_active_session(req.session_id)
     handler = _get_mcp_handler()
     result = handler._handle_tools_call({"name": req.tool, "arguments": req.args})
     return JSONResponse({"tool": req.tool, "result": result["content"][0]["text"], "isError": result.get("isError", False)})
@@ -1978,9 +2065,13 @@ async def api_plugin_marketplace():
 class PluginInstallReq(BaseModel):
     url: str
     name: str
+    session_id: str
 
 @app.post("/api/plugins/install")
 async def api_install_plugin(req: PluginInstallReq):
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.experiments import install_plugin
     result = install_plugin(req.url, req.name)
     return JSONResponse({"result": result})
@@ -2355,12 +2446,16 @@ async def api_cleanup_worktree(req: WorktreeReq):
 # --- MCP Client Management (connect to external MCP servers) ---
 
 @app.get("/api/mcp/servers")
-async def api_mcp_servers():
+async def api_mcp_servers(session_id: str = ""):
     """List all connected external MCP servers and their tools."""
+    user, error = _require_admin(session_id)
+    if error:
+        return error
     from src.mcp import list_mcp_clients
     return JSONResponse({"servers": list_mcp_clients()})
 
 class MCPRegisterStdio(BaseModel):
+    session_id: str
     name: str
     command: list[str]
     env: dict = {}
@@ -2368,34 +2463,46 @@ class MCPRegisterStdio(BaseModel):
 @app.post("/api/mcp/register/stdio")
 async def api_register_mcp_stdio(req: MCPRegisterStdio):
     """Connect to an external MCP server via stdio (launches subprocess)."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.mcp import register_mcp_server_stdio
     result = await register_mcp_server_stdio(req.name, req.command, req.env or None)
     return JSONResponse(result)
 
 class MCPRegisterSSE(BaseModel):
+    session_id: str
     name: str
     url: str
 
 @app.post("/api/mcp/register/sse")
 async def api_register_mcp_sse(req: MCPRegisterSSE):
     """Connect to an external MCP server via SSE/HTTP transport."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.mcp import register_mcp_server_sse
     result = await register_mcp_server_sse(req.name, req.url)
     return JSONResponse(result)
 
 # Legacy endpoint for backward compatibility
 class MCPReq(BaseModel):
+    session_id: str
     name: str
     url: str
 
 @app.post("/api/mcp/register")
 async def api_register_mcp(req: MCPReq):
     """Legacy: register via URL (auto-detects transport)."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.mcp import register_mcp_server_sse
     result = await register_mcp_server_sse(req.name, req.url)
     return JSONResponse(result)
 
 class MCPCallReq(BaseModel):
+    session_id: str
     server: str
     tool: str
     arguments: dict = {}
@@ -2403,23 +2510,33 @@ class MCPCallReq(BaseModel):
 @app.post("/api/mcp/call")
 async def api_mcp_call_tool(req: MCPCallReq):
     """Call a tool on a connected external MCP server."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.mcp import call_mcp_tool
     result = await call_mcp_tool(req.server, req.tool, req.arguments)
     return JSONResponse({"result": result, "isError": "ERROR" in result})
 
 class MCPDisconnectReq(BaseModel):
+    session_id: str
     name: str
 
 @app.post("/api/mcp/disconnect")
 async def api_mcp_disconnect(req: MCPDisconnectReq):
     """Disconnect from an external MCP server."""
+    user, error = _require_admin(req.session_id)
+    if error:
+        return error
     from src.mcp import disconnect_mcp_server
     result = await disconnect_mcp_server(req.name)
     return JSONResponse(result)
 
 @app.get("/api/mcp/tools")
-async def api_mcp_all_tools():
+async def api_mcp_all_tools(session_id: str = ""):
     """List all tools from all connected external MCP servers."""
+    user, error = _require_admin(session_id)
+    if error:
+        return error
     from src.mcp import get_all_mcp_tools
     return JSONResponse({"tools": get_all_mcp_tools()})
 
@@ -2535,17 +2652,12 @@ class DeleteUploadReq(BaseModel):
 @app.post("/api/uploads/delete")
 async def delete_upload(req: DeleteUploadReq):
     """Delete an uploaded file. Requires valid session."""
-    if req.session_id:
-        user = get_session_user(req.session_id)
-        if not user:
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
-    import re as _re2
-    if not _re2.match(r'^[a-zA-Z0-9_\-]+\.[a-z0-9]+$', req.filename):
+    user, error = _require_authenticated(req.session_id)
+    if error:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    filepath = _resolve_upload_path(req.filename)
+    if filepath is None:
         return JSONResponse({"error": "Invalid filename"}, status_code=400)
-    filepath = UPLOAD_DIR / req.filename
-    # Prevent path traversal
-    if not filepath.resolve().parent == UPLOAD_DIR.resolve():
-        return JSONResponse({"error": "Invalid path"}, status_code=400)
     if not filepath.exists():
         return JSONResponse({"error": "File not found"}, status_code=404)
     try:
@@ -2557,10 +2669,9 @@ async def delete_upload(req: DeleteUploadReq):
 @app.get("/api/uploads/list")
 async def list_uploads(session_id: str = ""):
     """List all uploaded files. Requires valid session."""
-    if session_id:
-        user = get_session_user(session_id)
-        if not user:
-            return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user, error = _require_authenticated(session_id)
+    if error:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
     files = []
     for f in sorted(UPLOAD_DIR.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
         if f.is_file():
@@ -2571,6 +2682,16 @@ async def list_uploads(session_id: str = ""):
             files.append({"name": f.name, "url": f"/uploads/{f.name}", "type": ftype, "size": f.stat().st_size})
     return JSONResponse({"files": files})
 
-# --- Serve uploads as static files ---
-from fastapi.staticfiles import StaticFiles
-app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+@app.get("/uploads/{filename}")
+async def serve_upload(filename: str, session_id: str = ""):
+    """Serve uploaded files only to authenticated sessions."""
+    user, error = _require_authenticated(session_id)
+    if error:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    filepath = _resolve_upload_path(filename)
+    if filepath is None:
+        return JSONResponse({"error": "Invalid filename"}, status_code=400)
+    if not filepath.exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    media_type = mimetypes.guess_type(str(filepath))[0]
+    return FileResponse(filepath, filename=filepath.name, media_type=media_type)

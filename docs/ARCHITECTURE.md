@@ -255,7 +255,7 @@ user_preferences (id, user_id, category, key, value, confidence)
 ## Security Model
 
 ```
-Authentication: bcrypt (cost 12) + auto-upgrade from legacy SHA-256
+Authentication: PBKDF2 + auto-upgrade from legacy bcrypt/scrypt/SHA-256
 Encryption: Fernet (AES-128-CBC + HMAC-SHA256) for messages, tokens
 Session: 128-bit random hex tokens (32 chars)
 CORS: Regex whitelist (localhost + trycloudflare.com)

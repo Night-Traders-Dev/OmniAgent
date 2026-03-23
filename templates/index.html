@@ -1192,13 +1192,23 @@
         const _audioExts = ['.wav','.mp3','.ogg','.flac','.m4a'];
         const _videoExts = ['.mp4','.webm','.mov','.avi'];
         function getFileType(url) {
-            const ext = (url.match(/\.[a-z0-9]+$/i)||[''])[0].toLowerCase();
+            const clean = (url || '').split('?')[0];
+            const ext = (clean.match(/\.[a-z0-9]+$/i)||[''])[0].toLowerCase();
             if (_imgExts.includes(ext)) return 'image';
             if (_audioExts.includes(ext)) return 'audio';
             if (_videoExts.includes(ext)) return 'video';
             return 'file';
         }
-        function getFileName(url) { return url.split('/').pop() || url; }
+        function withSession(url) {
+            if (!url || !url.includes('/uploads/')) return url;
+            const u = new URL(url, window.location.origin);
+            if (sessionId) u.searchParams.set('session_id', sessionId);
+            return u.pathname + u.search;
+        }
+        function getFileName(url) {
+            const clean = (url || '').split('?')[0];
+            return clean.split('/').pop() || clean;
+        }
         function getFileIcon(type) {
             const icons = {image:'&#x1F5BC;',audio:'&#x1F50A;',video:'&#x1F3AC;',file:'&#x1F4CE;'};
             return icons[type]||icons.file;
@@ -1246,21 +1256,22 @@
         function buildMediaCard(url) {
             const type = getFileType(url);
             const name = getFileName(url);
+            const resolvedUrl = withSession(url);
             const card = document.createElement('div');
             card.className = 'media-card';
-            card.dataset.mediaUrl = url;
+            card.dataset.mediaUrl = resolvedUrl;
             card.dataset.mediaName = name;
-            card.oncontextmenu = (e) => { e.preventDefault(); showMediaContextMenu(e, url, name); };
+            card.oncontextmenu = (e) => { e.preventDefault(); showMediaContextMenu(e, resolvedUrl, name); };
             // Long press for touch
             let lpTimer;
-            card.addEventListener('touchstart', (e) => { lpTimer = setTimeout(() => { e.preventDefault(); showMediaContextMenu(e.touches[0], url, name); }, 500); });
+            card.addEventListener('touchstart', (e) => { lpTimer = setTimeout(() => { e.preventDefault(); showMediaContextMenu(e.touches[0], resolvedUrl, name); }, 500); });
             card.addEventListener('touchend', () => clearTimeout(lpTimer));
             card.addEventListener('touchmove', () => clearTimeout(lpTimer));
 
             if (type === 'image') {
                 const img = document.createElement('img');
-                img.src = url; img.alt = name; img.loading = 'lazy';
-                img.onclick = () => window.open(url, '_blank');
+                img.src = resolvedUrl; img.alt = name; img.loading = 'lazy';
+                img.onclick = () => window.open(resolvedUrl, '_blank');
                 card.appendChild(img);
             } else if (type === 'audio') {
                 const lbl = document.createElement('div');
@@ -1268,17 +1279,17 @@
                 lbl.innerHTML = `${getFileIcon(type)} ${name}`;
                 card.appendChild(lbl);
                 const audio = document.createElement('audio');
-                audio.controls = true; audio.src = url; audio.preload = 'metadata';
+                audio.controls = true; audio.src = resolvedUrl; audio.preload = 'metadata';
                 card.appendChild(audio);
             } else if (type === 'video') {
                 const video = document.createElement('video');
-                video.controls = true; video.src = url; video.preload = 'metadata';
+                video.controls = true; video.src = resolvedUrl; video.preload = 'metadata';
                 card.appendChild(video);
             } else {
                 card.innerHTML = `<div class="file-card">
                     <span class="file-icon">${getFileIcon(type)}</span>
                     <div class="file-info"><div class="file-name">${name}</div><div class="file-type">${(name.match(/\.[^.]+$/)||[''])[0].replace('.','').toUpperCase()||'FILE'}</div></div>
-                    <div class="file-actions"><button onclick="downloadFile('${url}','${name}')">Download</button></div>
+                    <div class="file-actions"><button onclick="downloadFile('${resolvedUrl}','${name}')">Download</button></div>
                 </div>`;
             }
             return card;
@@ -1547,7 +1558,7 @@
             try {
                 const r = await fetch('/api/oauth/config', {
                     method: 'POST', headers: {'Content-Type':'application/json'},
-                    body: JSON.stringify({service, client_id: clientId, client_secret: clientSecret}),
+                    body: JSON.stringify({service, client_id: clientId, client_secret: clientSecret, session_id: sessionId}),
                 });
                 const d = await r.json();
                 if (d.ok) {
@@ -1607,7 +1618,7 @@
         // --- Upload ---
         async function uploadFile(input) {
             const file = input.files[0]; if(!file) return;
-            const fd = new FormData(); fd.append('file', file);
+            const fd = new FormData(); fd.append('file', file); fd.append('session_id', sessionId);
             try{
                 const r = await fetch('/api/upload',{method:'POST',body:fd});
                 const d = await r.json();
@@ -1798,7 +1809,7 @@
         async function loadPlugins() {
             const list = document.getElementById('plugin-list');
             try {
-                const r = await fetch('/api/plugins');
+                const r = await fetch(`/api/plugins?session_id=${encodeURIComponent(sessionId)}`);
                 const d = await r.json();
                 const plugins = d.plugins || [];
                 if (!plugins.length) { list.innerHTML = '<span style="color:var(--dim);font-size:.75rem">No plugins loaded. Drop .py files in ~/.omniagent/tools/</span>'; return; }
@@ -1814,7 +1825,11 @@
         async function reloadPlugins() {
             showToast('Reloading plugins...');
             try {
-                const r = await fetch('/api/plugins/reload', {method:'POST'});
+                const r = await fetch('/api/plugins/reload', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({session_id: sessionId}),
+                });
                 const d = await r.json();
                 if (d.ok) showToast(`Loaded ${d.count} plugin(s)`);
                 else showToast(d.error || 'Failed');
@@ -2072,7 +2087,7 @@
         async function uploadImage(input) {
             const file = input.files[0]; if(!file) return;
             // First upload the file
-            const fd = new FormData(); fd.append('file', file);
+            const fd = new FormData(); fd.append('file', file); fd.append('session_id', sessionId);
             try {
                 const r = await fetch('/api/upload', {method:'POST', body: fd});
                 const d = await r.json();
@@ -2344,6 +2359,7 @@
                     if (!file) return;
                     const formData = new FormData();
                     formData.append('file', file, `paste_${Date.now()}.png`);
+                    formData.append('session_id', sessionId);
                     showToast('Uploading pasted image...');
                     fetch('/api/upload', {method:'POST', body:formData})
                         .then(r=>r.json()).then(d=>{
@@ -2394,6 +2410,7 @@
                 for (const file of files) {
                     const formData = new FormData();
                     formData.append('file', file);
+                    formData.append('session_id', sessionId);
                     fetch('/api/upload', {method:'POST', body:formData})
                         .then(r=>r.json()).then(d=>{
                             if(d.ok){

@@ -121,7 +121,7 @@ DEV=1 python omni_agent.py
 - **OAuth2** — One-click connect for GitHub (repo, gist) and Google (Drive, Gmail, Tasks)
 
 ### Security
-- **bcrypt passwords** with auto-upgrade from legacy hashes
+- **PBKDF2 password hashing** with auto-upgrade from older hashes
 - **Fernet encryption** (AES-128-CBC + HMAC-SHA256) for all chat messages and tokens
 - **CORS restricted** to localhost + Cloudflare tunnels
 - **Rate limiting** — 60/min default on all 155 endpoints

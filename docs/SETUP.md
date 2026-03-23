@@ -37,7 +37,7 @@ Open **http://localhost:8000** in your browser.
 
 Core:
 ```bash
-pip install fastapi uvicorn openai slowapi pydantic cryptography bcrypt
+pip install fastapi uvicorn openai slowapi pydantic cryptography
 ```
 
 Voice (optional):

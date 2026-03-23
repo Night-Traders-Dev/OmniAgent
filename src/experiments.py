@@ -203,6 +203,15 @@ def install_plugin(plugin_url: str, name: str) -> str:
     plugin_dir.mkdir(parents=True, exist_ok=True)
     try:
         import urllib.request
+        import re
+        from urllib.parse import urlparse
+
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", name):
+            return "Failed: Invalid plugin name"
+        parsed = urlparse(plugin_url)
+        if parsed.scheme != "https":
+            return "Failed: Plugin URL must use HTTPS"
+
         dest = plugin_dir / f"{name}.py"
         urllib.request.urlretrieve(plugin_url, str(dest))
         return f"Installed {name} to {dest}"

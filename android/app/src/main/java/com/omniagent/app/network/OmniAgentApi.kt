@@ -469,7 +469,7 @@ class OmniAgentApi(var baseUrl: String = "") {
     // --- Plugins ---
 
     suspend fun getPlugins(): List<JsonObject> = withContext(Dispatchers.IO) {
-        val request = Request.Builder().url("$baseUrl/api/plugins").build()
+        val request = Request.Builder().url("$baseUrl/api/plugins?session_id=$sessionId").build()
         val response = client.newCall(request).execute()
         val parsed = safeParseJson(response.body?.string())
         val type = object : TypeToken<List<JsonObject>>() {}.type
@@ -478,8 +478,9 @@ class OmniAgentApi(var baseUrl: String = "") {
     }
 
     suspend fun reloadPlugins(): JsonObject = withContext(Dispatchers.IO) {
+        val body = JsonObject().apply { addProperty("session_id", sessionId) }
         val request = Request.Builder().url("$baseUrl/api/plugins/reload")
-            .post("".toRequestBody(json)).build()
+            .post(gson.toJson(body).toRequestBody(json)).build()
         safeParseJson(client.newCall(request).execute().body?.string())
     }
 
@@ -614,6 +615,7 @@ class OmniAgentApi(var baseUrl: String = "") {
             addProperty("service", service)
             addProperty("client_id", clientId)
             addProperty("client_secret", clientSecret)
+            addProperty("session_id", sessionId)
         }
         val request = Request.Builder().url("$baseUrl/api/oauth/config")
             .post(gson.toJson(body).toRequestBody(json)).build()
@@ -667,6 +669,7 @@ class OmniAgentApi(var baseUrl: String = "") {
         val multipart = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart("file", filename, fileBody)
+            .addFormDataPart("session_id", sessionId)
             .build()
         val request = Request.Builder().url("$baseUrl/api/upload").post(multipart).build()
         safeParseJson(client.newCall(request).execute().body?.string())

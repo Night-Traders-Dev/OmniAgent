@@ -57,6 +57,13 @@ _faiss_index = None  # FAISS index for fast vector search
 _faiss_paths: list[str] = []  # Ordered paths matching FAISS index positions
 _MAX_INDEX_FILES = 5000
 _EMBED_DIM = 256
+_INDEXABLE_EXTS = {'.py', '.js', '.ts', '.jsx', '.tsx', '.kt', '.java', '.rs', '.go', '.c', '.cpp', '.h', '.rb', '.sh'}
+_INDEX_IGNORE_DIRS = {
+    '.git', '__pycache__', '.venv', 'venv', 'node_modules', 'build', 'dist', 'target',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.gradle', '.kotlin',
+    'logs', 'uploads',
+}
+_MAX_INDEX_FILE_BYTES = 500_000
 
 def _simple_embed(text: str) -> list[float]:
     """TF-IDF-like embedding using character trigrams → fixed 256-dim vector."""
@@ -116,37 +123,41 @@ def _summarize_file(path: str) -> str:
 def index_codebase(root: str = ".") -> int:
     """Index the codebase for RAG retrieval. Returns number of files indexed."""
     global _file_index
-    count = 0
     if len(_file_index) >= _MAX_INDEX_FILES:
         return len(_file_index)
-    code_exts = {'.py', '.js', '.ts', '.jsx', '.tsx', '.kt', '.java', '.rs', '.go', '.c', '.cpp', '.h', '.rb', '.sh'}
     root_path = Path(root)
-    for f in root_path.rglob('*'):
-        if not f.is_file() or f.suffix not in code_exts:
-            continue
-        if any(p in str(f) for p in ['/node_modules/', '/.git/', '/build/', '/__pycache__/', '/venv/', '/.venv/']):
-            continue
-        try:
-            content = f.read_text(errors='replace')
-            file_hash = hashlib.md5(content.encode()).hexdigest()
-            # Skip if unchanged
-            if str(f) in _file_index and _file_index[str(f)].get('hash') == file_hash:
-                count += 1
+    if not root_path.exists():
+        return 0
+    for dirpath, dirnames, filenames in os.walk(root_path):
+        dirnames[:] = [d for d in dirnames if d not in _INDEX_IGNORE_DIRS]
+        for filename in filenames:
+            if len(_file_index) >= _MAX_INDEX_FILES:
+                _build_faiss_index()
+                return len(_file_index)
+            f = Path(dirpath) / filename
+            if f.suffix not in _INDEXABLE_EXTS:
                 continue
-            summary = _summarize_file(str(f))
-            embedding = _simple_embed(summary + ' ' + str(f))
-            _file_index[str(f)] = {
-                'hash': file_hash,
-                'summary': summary,
-                'embedding': embedding,
-                'size': len(content),
-            }
-            count += 1
-        except Exception:
-            continue
+            try:
+                if f.stat().st_size > _MAX_INDEX_FILE_BYTES:
+                    continue
+                content = f.read_text(errors='replace')
+                file_hash = hashlib.md5(content.encode()).hexdigest()
+                # Skip if unchanged
+                if str(f) in _file_index and _file_index[str(f)].get('hash') == file_hash:
+                    continue
+                summary = _summarize_file(str(f))
+                embedding = _simple_embed(summary + ' ' + str(f))
+                _file_index[str(f)] = {
+                    'hash': file_hash,
+                    'summary': summary,
+                    'embedding': embedding,
+                    'size': len(content),
+                }
+            except Exception:
+                continue
     # Build FAISS index for fast retrieval
     _build_faiss_index()
-    return count
+    return len(_file_index)
 
 def retrieve_context(query: str, max_files: int = 5, max_chars: int = 8000) -> str:
     """Retrieve relevant files/functions for a query using FAISS vector search (or cosine fallback)."""

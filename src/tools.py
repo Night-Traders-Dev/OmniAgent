@@ -149,6 +149,7 @@ DANGEROUS_FIRST_TOKENS = {"sudo", "su", "doas", "pkexec"}
 
 # Pre-compiled regex for performance (used in is_dangerous_command)
 _PIPE_SHELL_RE = re.compile(r'\|\s*(ba)?sh\b')
+UNSAFE_SHELL_TOKENS = {"&&", "||", ";", "|", "&"}
 
 # Per-tool timeouts (Tier 2)
 TOOL_TIMEOUTS = {
@@ -303,16 +304,21 @@ def run_shell(cmd: str, timeout: int = 60) -> str:
     if danger:
         return str(_err(danger, ToolErrorKind.DANGEROUS))
     try:
-        first_token = shlex.split(cmd)[0] if cmd.strip() else ""
+        tokens = shlex.split(cmd) if cmd.strip() else []
     except ValueError:
-        first_token = cmd.strip().split()[0] if cmd.strip() else ""
+        return str(_err("Command could not be parsed safely.", ToolErrorKind.VALIDATION))
+    if not tokens:
+        return str(_err("Empty command.", ToolErrorKind.VALIDATION))
+    if any(token in UNSAFE_SHELL_TOKENS for token in tokens):
+        return str(_err("Shell control operators are not supported. Run a single command only.", ToolErrorKind.VALIDATION))
+    first_token = tokens[0]
     base_cmd = os.path.basename(first_token)
     if base_cmd not in ALLOWED_SHELL_COMMANDS:
         return str(_err(f"'{base_cmd}' not in allowed commands. Available: {', '.join(sorted(ALLOWED_SHELL_COMMANDS))}",
                        ToolErrorKind.BLOCKED))
     try:
         result = subprocess.run(
-            ["/bin/bash", "-c", cmd],
+            tokens,
             capture_output=True, text=True, timeout=timeout,
         )
         return f"EXIT:{result.returncode}\nOUT: {result.stdout}\nERR: {result.stderr}"
@@ -1185,15 +1191,18 @@ def execute_tool(tool_name: str, args: dict) -> str:
             try:
                 import asyncio
                 from src.mcp import call_mcp_tool
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
+                try:
+                    running_loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    running_loop = None
+                if running_loop is not None:
                     import concurrent.futures
                     with concurrent.futures.ThreadPoolExecutor() as pool:
                         result = pool.submit(
                             lambda: asyncio.run(call_mcp_tool(server_name, remote_tool, args))
                         ).result(timeout=30)
                 else:
-                    result = loop.run_until_complete(call_mcp_tool(server_name, remote_tool, args))
+                    result = asyncio.run(call_mcp_tool(server_name, remote_tool, args))
                 return result
             except Exception as e:
                 return str(_err(f"MCP call failed ({server_name}/{remote_tool}): {e}", ToolErrorKind.EXECUTION))

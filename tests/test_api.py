@@ -1,5 +1,6 @@
 """Tests for FastAPI endpoints."""
 import json
+import secrets
 import pytest
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
@@ -27,6 +28,21 @@ def reset():
 
 @pytest.fixture
 def client(): return TestClient(app)
+
+
+def _create_test_session(*, admin: bool = False):
+    from src.persistence import create_user, create_session, get_db
+
+    username = f"api_{secrets.token_hex(4)}"
+    user = create_user(username, "testpass123")
+    assert user is not None
+
+    conn = get_db()
+    conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (1 if admin else 0, user["id"]))
+    conn.commit()
+    conn.close()
+
+    return user, create_session(user["id"], "API Test")
 
 class TestHome:
     def test_html(self, client):
@@ -131,3 +147,78 @@ class TestChat:
             m.return_value = {"reply":"ok"}
             client.post("/chat", json={"message":"t","tool_flags":{"web_search":False},"model_override":"auto"})
             assert state.enabled_tools["web_search"] is False
+
+
+class TestSecurityGuards:
+    def test_mcp_requires_auth(self, client):
+        r = client.post("/mcp", json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "python_eval", "arguments": {"expression": "21 * 2"}},
+        })
+        assert r.status_code == 401
+
+    def test_mcp_allows_authenticated_session(self, client):
+        _, sid = _create_test_session()
+        r = client.post(f"/mcp?session_id={sid}", json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "python_eval", "arguments": {"expression": "21 * 2"}},
+        })
+        assert r.status_code == 200
+        assert "42" in r.json()["result"]["content"][0]["text"]
+
+    def test_upload_requires_auth(self, client):
+        r = client.post("/api/upload", files={"file": ("note.txt", b"hello world")})
+        assert r.status_code == 401
+
+    def test_upload_download_requires_auth(self, client):
+        _, sid = _create_test_session()
+        upload = client.post(
+            "/api/upload",
+            data={"session_id": sid},
+            files={"file": ("note.txt", b"hello world")},
+        )
+        assert upload.status_code == 200
+        filename = upload.json()["filename"]
+
+        denied = client.get(f"/uploads/{filename}")
+        assert denied.status_code == 401
+
+        allowed = client.get(f"/uploads/{filename}?session_id={sid}")
+        assert allowed.status_code == 200
+        assert allowed.content == b"hello world"
+
+    def test_plugin_endpoints_require_admin(self, client):
+        _, sid = _create_test_session(admin=False)
+        r = client.post("/api/plugins/reload", json={"session_id": sid})
+        assert r.status_code == 403
+
+    def test_admin_plugin_reload_allowed(self, client):
+        _, sid = _create_test_session(admin=True)
+        r = client.post("/api/plugins/reload", json={"session_id": sid})
+        assert r.status_code == 200
+        assert "count" in r.json()
+
+    def test_invite_list_requires_admin(self, client):
+        _, sid = _create_test_session(admin=False)
+        r = client.get(f"/api/auth/invite/list?session_id={sid}")
+        assert r.status_code == 403
+
+    def test_non_owner_cannot_share_session(self, client):
+        owner, owner_sid = _create_test_session()
+        attacker, attacker_sid = _create_test_session()
+        r = client.post("/api/collab/share", json={"session_id": attacker_sid, "target_session": owner_sid})
+        assert r.status_code == 403
+
+    def test_oauth_config_requires_admin(self, client):
+        _, sid = _create_test_session(admin=False)
+        r = client.post("/api/oauth/config", json={
+            "service": "github",
+            "client_id": "abc",
+            "client_secret": "xyz",
+            "session_id": sid,
+        })
+        assert r.status_code == 403

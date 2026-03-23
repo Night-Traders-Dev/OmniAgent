@@ -112,7 +112,11 @@ SYMBOL_PATTERNS = {
     ],
 }
 
-IGNORE_DIRS = {'.git', '__pycache__', 'node_modules', '.venv', 'venv', 'build', 'dist', '.idea', '.vscode', 'target'}
+IGNORE_DIRS = {
+    '.git', '__pycache__', 'node_modules', '.venv', 'venv', 'build', 'dist', '.idea', '.vscode', 'target',
+    '.pytest_cache', '.mypy_cache', '.ruff_cache', '.cache', '.gradle', '.kotlin', 'logs', 'uploads',
+}
+CODE_EXTS = set(LANG_MAP.keys())
 
 
 def detect_language(filepath: str) -> str:
@@ -165,6 +169,8 @@ def build_dependency_graph(root: str = ".") -> dict[str, FileInfo]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if d not in IGNORE_DIRS]
         for filename in filenames:
+            if Path(filename).suffix.lower() not in CODE_EXTS:
+                continue
             filepath = os.path.join(dirpath, filename)
             info = analyze_file(filepath)
             if info:

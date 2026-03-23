@@ -1,7 +1,7 @@
 """
 Persistent storage for user accounts, sessions, and integration tokens.
 Uses SQLite with Fernet (AES-128-CBC + HMAC-SHA256) encryption for sensitive data.
-Passwords stored as salted SHA-256 hashes.
+Passwords stored as salted PBKDF2 hashes, with verification support for older formats.
 """
 import sqlite3
 import json
@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet, InvalidToken
 
 DB_PATH = Path(__file__).parent.parent / "omni_data.db"
 KEY_PATH = Path(__file__).parent.parent / ".omni_key"
+PASSWORD_PBKDF2_ITERATIONS = 600_000
 
 
 def _get_encryption_key() -> bytes:
@@ -104,6 +105,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            is_admin INTEGER DEFAULT 0,
             created_at TEXT DEFAULT (datetime('now')),
             system_prompt TEXT DEFAULT '',
             execution_mode TEXT DEFAULT 'execute',
@@ -174,25 +176,43 @@ def init_db():
             conn.execute(f"ALTER TABLE sessions ADD COLUMN {col} TEXT DEFAULT {default}")
         except sqlite3.OperationalError:
             pass
+    for col, default in [
+        ("is_admin", "0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} INTEGER DEFAULT {default}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
 
 def hash_password(password: str) -> str:
-    """Hash password using bcrypt (cost factor 12). Falls back to PBKDF2 if bcrypt unavailable."""
-    try:
-        import bcrypt
-        return "bcrypt:" + bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=12)).decode()
-    except ImportError:
-        # Fallback: PBKDF2-HMAC-SHA256 with 600k iterations (OWASP recommended)
-        salt = secrets.token_bytes(32)
-        h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 600_000)
-        return f"pbkdf2:{base64.b64encode(salt).decode()}:{base64.b64encode(h).decode()}"
+    """Hash a password using PBKDF2-HMAC-SHA256."""
+    salt = secrets.token_bytes(32)
+    h = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, PASSWORD_PBKDF2_ITERATIONS)
+    return f"pbkdf2:{base64.b64encode(salt).decode()}:{base64.b64encode(h).decode()}"
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
-    """Verify password against stored hash. Supports bcrypt, PBKDF2, and legacy SHA-256."""
+    """Verify password against stored hash. Supports PBKDF2, scrypt, bcrypt, and legacy SHA-256."""
     import hmac as _hmac
+    if stored_hash.startswith("scrypt:"):
+        try:
+            _, n_str, r_str, p_str, salt_b64, hash_b64 = stored_hash.split(":", 5)
+            salt = base64.b64decode(salt_b64)
+            expected = base64.b64decode(hash_b64)
+            actual = hashlib.scrypt(
+                password.encode(),
+                salt=salt,
+                n=int(n_str),
+                r=int(r_str),
+                p=int(p_str),
+                dklen=len(expected),
+            )
+            return _hmac.compare_digest(actual, expected)
+        except (ValueError, TypeError):
+            return False
     if stored_hash.startswith("bcrypt:"):
         try:
             import bcrypt
@@ -200,17 +220,23 @@ def verify_password(password: str, stored_hash: str) -> bool:
         except ImportError:
             return False
     elif stored_hash.startswith("pbkdf2:"):
-        _, salt_b64, hash_b64 = stored_hash.split(":", 2)
-        salt = base64.b64decode(salt_b64)
-        expected = base64.b64decode(hash_b64)
-        actual = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, 600_000)
-        return _hmac.compare_digest(actual, expected)
+        try:
+            _, salt_b64, hash_b64 = stored_hash.split(":", 2)
+            salt = base64.b64decode(salt_b64)
+            expected = base64.b64decode(hash_b64)
+            actual = hashlib.pbkdf2_hmac('sha256', password.encode(), salt, PASSWORD_PBKDF2_ITERATIONS)
+            return _hmac.compare_digest(actual, expected)
+        except (ValueError, TypeError):
+            return False
     else:
         # Legacy SHA-256 — verify then upgrade on next login
-        salt, h = stored_hash.split(":", 1)
-        return _hmac.compare_digest(
-            hashlib.sha256(f"{salt}:{password}".encode()).hexdigest(), h
-        )
+        try:
+            salt, h = stored_hash.split(":", 1)
+            return _hmac.compare_digest(
+                hashlib.sha256(f"{salt}:{password}".encode()).hexdigest(), h
+            )
+        except ValueError:
+            return False
 
 
 # --- User Management ---
@@ -218,9 +244,10 @@ def verify_password(password: str, stored_hash: str) -> bool:
 def create_user(username: str, password: str) -> dict | None:
     conn = get_db()
     try:
+        is_admin = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0
         conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
-            (username, hash_password(password)),
+            "INSERT INTO users (username, password_hash, is_admin) VALUES (?, ?, ?)",
+            (username, hash_password(password), int(is_admin)),
         )
         conn.commit()
         user = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
@@ -245,9 +272,9 @@ def authenticate_user(username: str, password: str) -> dict | None:
     if not user or not verify_password(password, user["password_hash"]):
         conn.close()
         return None
-    # Auto-upgrade legacy SHA-256 hashes to bcrypt/PBKDF2
+    # Auto-upgrade older hashes to the current PBKDF2 format.
     stored = user["password_hash"]
-    if not stored.startswith("bcrypt:") and not stored.startswith("pbkdf2:"):
+    if not stored.startswith("pbkdf2:"):
         new_hash = hash_password(password)
         conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (new_hash, user["id"]))
         conn.commit()
@@ -475,6 +502,17 @@ def can_access_session(session_id: str, user_id: int) -> bool:
             user_id = ? OR id IN (SELECT session_id FROM session_collaborators WHERE user_id = ?)
         )
     """, (session_id, user_id, user_id)).fetchone()
+    conn.close()
+    return row is not None
+
+
+def is_session_owner(session_id: str, user_id: int) -> bool:
+    """Check whether a user owns a session."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT 1 FROM sessions WHERE id = ? AND user_id = ?",
+        (session_id, user_id),
+    ).fetchone()
     conn.close()
     return row is not None
 
