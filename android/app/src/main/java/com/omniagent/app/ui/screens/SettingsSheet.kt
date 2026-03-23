@@ -368,6 +368,28 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
                 SettingsButton("Reasoning / Thinking Log", Accent) { vm.loadReasoningHistory() }
                 Spacer(Modifier.height(4.dp))
                 SettingsButton("Long-Running Tasks", Accent) { vm.loadTaskHistory() }
+                Spacer(Modifier.height(4.dp))
+                SettingsButton("Conversation Tree", Accent) { vm.loadConversationTree() }
+                Spacer(Modifier.height(8.dp))
+                // Global search
+                var globalQuery by remember { mutableStateOf("") }
+                OutlinedTextField(
+                    value = globalQuery, onValueChange = { globalQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Search all conversations...", color = TextDim, fontSize = 12.sp) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                        focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary,
+                        cursorColor = Accent, focusedContainerColor = BgDark, unfocusedContainerColor = BgDark,
+                    ),
+                    shape = RoundedCornerShape(6.dp),
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp),
+                )
+                Spacer(Modifier.height(4.dp))
+                SettingsButton("Search All Sessions", Accent) {
+                    if (globalQuery.isNotBlank()) vm.globalSearch(globalQuery.trim())
+                }
             }
 
             // About

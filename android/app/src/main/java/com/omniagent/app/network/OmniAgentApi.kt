@@ -614,6 +614,20 @@ class OmniAgentApi(var baseUrl: String = "") {
         client.newCall(request).execute()
     }
 
+    // --- Pins ---
+
+    suspend fun pinMessage(sid: String, index: Int, content: String, role: String) = withContext(Dispatchers.IO) {
+        val body = JsonObject().apply {
+            addProperty("session_id", sid)
+            addProperty("message_index", index)
+            addProperty("content", content)
+            addProperty("role", role)
+        }
+        val request = Request.Builder().url("$baseUrl/api/pins")
+            .post(gson.toJson(body).toRequestBody(json)).build()
+        client.newCall(request).execute()
+    }
+
     // --- Reasoning History ---
 
     suspend fun getReasoningHistory(sid: String = ""): List<String> = withContext(Dispatchers.IO) {

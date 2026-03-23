@@ -1,0 +1,26 @@
+{
+  "productName": "OmniAgent",
+  "version": "8.3.0",
+  "identifier": "com.omniagent.desktop",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "OmniAgent v8.3",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* https://*.trycloudflare.com; img-src 'self' data: http://localhost:* https://*; connect-src 'self' http://localhost:* https://* ws://localhost:* wss://*; media-src 'self' http://localhost:*; frame-src http://localhost:* https://*"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

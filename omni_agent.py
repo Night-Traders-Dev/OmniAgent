@@ -457,9 +457,14 @@ def main():
     logger.info("[Metrics] Background metrics logger started (60s interval)")
 
     # Start server
-    logger.info("[Server] Starting on http://0.0.0.0:8000")
+    dev_mode = os.environ.get("DEV", "").lower() in ("1", "true", "yes")
+    if dev_mode:
+        logger.info("[Server] Starting on http://0.0.0.0:8000 (HOT RELOAD enabled)")
+    else:
+        logger.info("[Server] Starting on http://0.0.0.0:8000")
     config = uvicorn.Config(
         app, host="0.0.0.0", port=8000, log_level="warning",
+        reload=dev_mode, reload_dirs=["src", "templates"] if dev_mode else None,
     )
     server = uvicorn.Server(config)
     server.install_signal_handlers = lambda: None

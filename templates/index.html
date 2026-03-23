@@ -438,6 +438,7 @@
             <h4>History</h4>
             <button class="menu-btn" style="margin:0 0 6px;width:100%" onclick="showReasoningHistory()">Reasoning / Thinking Log</button>
             <button class="menu-btn" style="margin:0 0 6px;width:100%" onclick="showTaskHistory()">Long-Running Tasks</button>
+            <button class="menu-btn" style="margin:0 0 6px;width:100%" onclick="showForkTree()">Conversation Tree</button>
             <h4>About</h4>
             <div style="display:flex;gap:6px">
                 <button class="menu-btn" style="flex:1;margin:0" onclick="showChangelog()">Changelog</button>
@@ -615,6 +616,7 @@
             loadSessionHistory();
             loadCurrentChat();
             requestLocation();
+            initCollabWs();
             // Show username in right panel
             const userEl = document.getElementById('m-user');
             if (userEl) userEl.textContent = currentUser || 'guest';
@@ -2091,6 +2093,71 @@
             input.focus();
             input.select();
         });
+
+        // --- Real-time Collaboration (WebSocket presence) ---
+        let _ws = null;
+        let _typingTimeout = null;
+        function initCollabWs() {
+            if (!sessionId || _ws) return;
+            try {
+                const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                _ws = new WebSocket(`${proto}//${location.host}/ws/${sessionId}`);
+                _ws.onmessage = (e) => {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        if (msg.type === 'typing') showTypingIndicator(msg.user);
+                        else if (msg.type === 'message') loadCurrentChat();
+                    } catch(_){}
+                };
+                _ws.onclose = () => { _ws = null; setTimeout(initCollabWs, 5000); };
+                // Send typing indicators
+                document.getElementById('msg').addEventListener('input', () => {
+                    if (_ws?.readyState === 1) {
+                        _ws.send(JSON.stringify({type:'typing', user: authUsername||'anonymous'}));
+                    }
+                });
+            } catch(_){}
+        }
+        function showTypingIndicator(user) {
+            let el = document.getElementById('collab-typing');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'collab-typing';
+                el.style.cssText = 'font-size:.72rem;color:var(--dim);padding:2px 12px;font-style:italic';
+                const chatEl = document.getElementById('chat');
+                chatEl.parentNode.insertBefore(el, chatEl.nextSibling);
+            }
+            el.textContent = `${user} is typing...`;
+            clearTimeout(_typingTimeout);
+            _typingTimeout = setTimeout(() => { el.textContent = ''; }, 3000);
+        }
+
+        // --- Conversation Fork Tree ---
+        async function showForkTree() {
+            const modal = document.getElementById('changelog-modal');
+            const content = document.getElementById('changelog-content');
+            content.innerHTML = '<p style="color:var(--dim)">Loading conversation tree...</p>';
+            modal.style.display = 'block';
+            try {
+                const r = await fetch(`/api/chat/tree/${sessionId}`);
+                const d = await r.json();
+                let html = '<h2 style="color:var(--accent);margin:0 0 12px">Conversation Tree</h2>';
+                html += `<p style="color:var(--dim);font-size:.8rem">${d.total} messages</p>`;
+                html += '<div style="font-size:.8rem;line-height:2">';
+                (d.nodes||[]).forEach((n,i) => {
+                    const indent = n.role === 'assistant' ? 'margin-left:20px' : '';
+                    const color = n.role === 'user' ? 'var(--green)' : 'var(--accent)';
+                    const icon = n.role === 'user' ? '▸' : '◂';
+                    html += `<div style="${indent};border-left:2px solid ${color};padding-left:8px;margin:4px 0">
+                        <span style="color:${color};font-weight:bold">${icon} ${n.role}</span>
+                        <span style="color:var(--dim);font-size:.7rem;margin-left:8px">${n.created_at||''}</span>
+                        <div style="color:var(--text);font-size:.78rem">${(n.preview||'').replace(/</g,'&lt;')}</div>
+                    </div>`;
+                });
+                html += '</div>';
+                content.innerHTML = html;
+            } catch(e) { content.innerHTML = '<p style="color:var(--red)">Failed: '+e.message+'</p>'; }
+        }
 
         // --- Keyboard Shortcut Help ---
         document.getElementById('msg').title = 'Ctrl+Enter to send | Ctrl+F to search | Esc to close panels | Double-click message to edit';

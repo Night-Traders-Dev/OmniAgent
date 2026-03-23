@@ -1165,6 +1165,80 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // --- Theme Toggle ---
+
+    fun toggleTheme() {
+        com.omniagent.app.ui.theme.isDarkTheme = !com.omniagent.app.ui.theme.isDarkTheme
+    }
+
+    // --- Global Search ---
+
+    fun globalSearch(query: String) {
+        viewModelScope.launch {
+            try {
+                val r = okhttp3.Request.Builder()
+                    .url("${api.baseUrl}/api/search/global?q=${java.net.URLEncoder.encode(query, "UTF-8")}&session_id=${api.sessionId}")
+                    .build()
+                val resp = okhttp3.OkHttpClient().newCall(r).execute()
+                val body = resp.body?.string() ?: "{}"
+                val obj = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                val arr = obj.getAsJsonArray("results")
+                val results = mutableListOf<Map<String, String>>()
+                if (arr != null) {
+                    for (i in 0 until arr.size()) {
+                        val item = arr.get(i).asJsonObject
+                        results.add(mapOf(
+                            "session_id" to (item.get("session_id")?.asString ?: ""),
+                            "role" to (item.get("role")?.asString ?: ""),
+                            "content" to (item.get("content")?.asString ?: ""),
+                            "session_title" to (item.get("session_title")?.asString ?: ""),
+                        ))
+                    }
+                }
+                _state.update { s -> s.copy(searchResults = results) }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // --- Pin Message ---
+
+    fun pinMessage(messageIndex: Int, content: String, role: String = "assistant") {
+        viewModelScope.launch {
+            try {
+                api.pinMessage(api.sessionId, messageIndex, content, role)
+                android.widget.Toast.makeText(getApplication(), "Message pinned", android.widget.Toast.LENGTH_SHORT).show()
+            } catch (_: Exception) {}
+        }
+    }
+
+    // --- Conversation Tree ---
+
+    fun loadConversationTree() {
+        viewModelScope.launch {
+            try {
+                val r = okhttp3.Request.Builder()
+                    .url("${api.baseUrl}/api/chat/tree/${api.sessionId}")
+                    .build()
+                val resp = okhttp3.OkHttpClient().newCall(r).execute()
+                val body = resp.body?.string() ?: "{}"
+                val obj = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                val nodes = obj.getAsJsonArray("nodes")
+                val lines = mutableListOf<String>()
+                if (nodes != null) {
+                    for (i in 0 until nodes.size()) {
+                        val n = nodes.get(i).asJsonObject
+                        val role = n.get("role")?.asString ?: "?"
+                        val preview = n.get("preview")?.asString ?: ""
+                        val indent = if (role == "assistant") "  " else ""
+                        val icon = if (role == "user") "\u25B8" else "\u25C2"
+                        lines.add("$indent$icon [$role] $preview")
+                    }
+                }
+                _state.update { s -> s.copy(reasoningHistory = lines, showReasoningHistory = true) }
+            } catch (_: Exception) {}
+        }
+    }
+
     // --- Task History ---
 
     fun loadTaskHistory() {

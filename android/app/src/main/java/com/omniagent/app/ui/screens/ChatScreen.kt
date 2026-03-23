@@ -163,6 +163,10 @@ fun TopBar(state: ChatUiState, onMenuClick: () -> Unit, onHistoryClick: () -> Un
                 IconButton(onClick = onSearchClick, modifier = Modifier.size(36.dp)) {
                     Icon(Icons.Filled.Search, contentDescription = "Search", tint = TextDim, modifier = Modifier.size(20.dp))
                 }
+                IconButton(onClick = { com.omniagent.app.ui.theme.isDarkTheme = !com.omniagent.app.ui.theme.isDarkTheme }, modifier = Modifier.size(36.dp)) {
+                    Icon(if (com.omniagent.app.ui.theme.isDarkTheme) Icons.Filled.LightMode else Icons.Filled.DarkMode,
+                        contentDescription = "Theme", tint = TextDim, modifier = Modifier.size(20.dp))
+                }
                 IconButton(onClick = onMenuClick) {
                     Icon(Icons.Filled.Settings, contentDescription = "Settings", tint = TextPrimary)
                 }
@@ -327,6 +331,11 @@ fun AssistantBubble(msg: UiMessage, context: Context, vm: ChatViewModel? = null,
                     leadingIcon = { Icon(Icons.Filled.Share, null, tint = TextDim, modifier = Modifier.size(18.dp)) },
                 )
                 if (vm != null && msgIndex >= 0) {
+                    DropdownMenuItem(
+                        text = { Text("Pin Message", color = Accent, fontSize = 13.sp) },
+                        onClick = { vm.pinMessage(msgIndex, msg.content, "assistant"); showMenu = false },
+                        leadingIcon = { Icon(Icons.Filled.PushPin, null, tint = Accent, modifier = Modifier.size(18.dp)) },
+                    )
                     HorizontalDivider(color = BorderDark)
                     DropdownMenuItem(
                         text = { Text("Good response", color = GreenDark, fontSize = 13.sp) },
