@@ -1,6 +1,18 @@
 # OmniAgent Changelog
 
-## v8.4.0 — 2026-03-23 (Current)
+## v8.4.1 — 2026-03-23 (Current)
+
+### NPU Full Pipeline Integration
+
+- **Fixed NPU preprocessing** — `processedText` was assigned but never sent to server; both streaming and fallback API calls now use the NPU-processed message
+- **Post-response NPU summarization** — Long server responses (>500 chars) automatically get an on-device TL;DR appended via Gemini Nano `summarize()`
+- **Server-side NPU hint parsing** — `[npu:intent=X,mood=Y]` prefix stripped from messages and injected as routing context; server skips redundant classification
+- **NPU fast-route in orchestrator** — When NPU pre-classifies intent (code→coder, debug→coder, question→researcher, summarize→reasoner, greeting→fast), orchestrator routes instantly without LLM planning step
+- **End-to-end NPU pipeline**: Query rewrite → intent classify → sentiment → server hint → fast route → response summarize → smart replies — all on-device via Gemini Nano
+
+---
+
+## v8.4.0 — 2026-03-23
 
 ### Gemini Nano On-Device LLM
 - Real LLM inference on the Galaxy S24 Ultra's Hexagon NPU via Google AI Core

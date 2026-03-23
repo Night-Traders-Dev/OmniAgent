@@ -63,7 +63,7 @@ At the bottom of the chat, you'll see:
 ### Acceleration
 - **BitNet** — Uses lightweight 2B CPU model for planning (frees GPU)
 - **Large Model (32B)** — Routes complex tasks to GPU worker's bigger model
-- **On-Device NPU** — (Android only) Uses phone's neural processor for instant responses
+- **On-Device NPU** — (Android only) Uses Gemini Nano on the phone's NPU for query rewriting, intent classification, sentiment analysis, response summarization, and smart replies. Handles greetings, time queries, and general knowledge entirely on-device. Server receives pre-classified intent hints for faster routing
 
 ## Chat Features
 

@@ -1,4 +1,4 @@
-# OmniAgent v8.4
+# OmniAgent v8.4.1
 
 **Fully local, autonomous AI agent framework** — 47 tools, 7 specialist agents, multi-phase task execution, running entirely on your hardware with no cloud API keys required.
 
@@ -81,6 +81,7 @@ DEV=1 python omni_agent.py
 | Reasoning | `deepseek-r1:8b` | Chain-of-thought analysis, planning |
 | Security | `dolphin3:8b` | Security research, vulnerability analysis |
 | Fast | `bitnet-2b` | Dispatch planning, classification (CPU) |
+| On-Device | Gemini Nano | Query rewrite, intent, sentiment, summarize (NPU) |
 | Vision | `llama3.2-vision:11b` | Image analysis |
 
 ## Key Features
@@ -96,6 +97,7 @@ DEV=1 python omni_agent.py
 - **Model A/B testing** — Compare two models side-by-side on the same prompt
 - **BitNet** — 1.58-bit 2B model runs on CPU for dispatch planning, freeing GPU
 - **On-device NPU** — Galaxy S24 Ultra Snapdragon 8 Gen 3 Hexagon NPU for local inference
+- **Gemini Nano** — On-device LLM via Google AI Core for query rewriting, intent classification, sentiment, summarization, and smart replies — all without server round-trip
 
 ### Voice
 - **STT** — faster-whisper for speech-to-text
@@ -186,7 +188,7 @@ OmniAgent/
 ├── Dockerfile             # Container image
 ├── omniagent.service      # systemd auto-start
 ├── setup-gpu-worker-wsl.ps1  # Windows WSL2 setup script
-├── CHANGELOG.md           # Full version history (v7.0 → v8.4)
+├── CHANGELOG.md           # Full version history (v7.0 → v8.4.1)
 └── .gitignore             # Comprehensive exclusions
 ```
 

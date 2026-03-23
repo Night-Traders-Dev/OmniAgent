@@ -679,6 +679,19 @@ async def stream(request: Request, session_id: str = "default"):
 
 MAX_MESSAGE_SIZE = 100_000  # 100KB
 
+import re as _npu_re
+_NPU_HINT_RE = _npu_re.compile(r"^\[npu:intent=(\w+),mood=(\w+)\]\s*")
+
+def _parse_npu_hints(message: str) -> tuple:
+    """Strip NPU hint prefix and return (clean_message, npu_context_str)."""
+    m = _NPU_HINT_RE.match(message)
+    if not m:
+        return message, ""
+    intent, mood = m.group(1), m.group(2)
+    clean = message[m.end():]
+    ctx = f"\nNPU PRE-ANALYSIS (from on-device Gemini Nano): intent={intent}, mood={mood}. Use these to skip redundant classification.\n"
+    return clean, ctx
+
 @app.post("/chat")
 @limiter.limit("20/minute")
 async def chat_api(request: Request, req: ChatReq):
@@ -703,6 +716,8 @@ async def _process_chat(request: Request, req: ChatReq, sid: str):
                 state.enabled_tools[k] = bool(v)
     if req.model_override is not None:
         state.model_override = req.model_override
+    # Parse NPU hints from Android client (Gemini Nano pre-analysis)
+    req.message, npu_ctx = _parse_npu_hints(req.message)
     # Tier 3: Build memory context (without mutating session state)
     memory_context = ""
     user = get_session_user(sid)
@@ -751,7 +766,7 @@ async def _process_chat(request: Request, req: ChatReq, sid: str):
     if voice_requested:
         voice_ctx = "\nVOICE NOTE: The user wants a spoken response. Give a concise, natural-language answer suitable for speech (no markdown, no code blocks, no bullet lists). Keep it conversational.\n"
 
-    full_context = (memory_context + location_ctx + voice_ctx).strip()
+    full_context = (memory_context + location_ctx + voice_ctx + npu_ctx).strip()
     result = await orchestrator.dispatch(req.message, context=full_context)
     if location_needed:
         result["location_needed"] = True
@@ -811,6 +826,8 @@ async def chat_stream(request: Request, req: ChatReq):
                 state.enabled_tools[k] = bool(v)
     if req.model_override is not None:
         state.model_override = req.model_override
+    # Parse NPU hints from Android client (Gemini Nano pre-analysis)
+    req.message, npu_ctx = _parse_npu_hints(req.message)
 
     # Check if location is needed but missing — tell client before streaming
     loc = _user_location.get(sid, {})
@@ -821,7 +838,8 @@ async def chat_stream(request: Request, req: ChatReq):
         if location_needed:
             yield f"data: {json.dumps({'location_needed': True})}\n\n"
         full_reply = ""
-        async for token in orchestrator.dispatch_streaming(req.message):
+        stream_ctx = npu_ctx.strip()
+        async for token in orchestrator.dispatch_streaming(req.message, context=stream_ctx):
             full_reply += token
             yield f"data: {json.dumps({'token': token})}\n\n"
         # Auto-synthesize speech after streaming completes
@@ -1856,7 +1874,7 @@ async def api_server_status():
     """Comprehensive server status for all subsystems."""
     from src.config import BITNET_ENABLED, EXPERTS, OLLAMA_NUM_CTX
     status = {
-        "version": "8.4.0",
+        "version": "8.4.1",
         "server": "running",
         "ollama": False,
         "bitnet": BITNET_ENABLED,

@@ -6,9 +6,11 @@ Enhanced with:
 - Tier 1: Improved context management (more turns, smarter summarization)
 - Tier 4: Cost-aware routing
 - Tier 4: Confidence signaling in synthesis
+- NPU pre-analysis: uses Gemini Nano hints from Android for faster routing
 """
 import asyncio
 import json
+import re
 from datetime import datetime
 from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED
 from src.state import state
@@ -125,7 +127,27 @@ class Orchestrator:
             return f"{user_input}\n\n[CONTEXT: The user previously asked: \"{last_user}\". The response was about: \"{last_assistant[:200]}\"]"
         return user_input
 
-    def _detect_simple_query(self, user_input: str) -> str | None:
+    @staticmethod
+    def _extract_npu_intent(context: str) -> str | None:
+        """Extract NPU pre-classified intent from context if present."""
+        m = re.search(r"NPU PRE-ANALYSIS.*?intent=(\w+)", context)
+        return m.group(1) if m else None
+
+    def _detect_simple_query(self, user_input: str, context: str = "") -> str | None:
+        # If NPU already classified intent, use it for fast routing
+        npu_intent = self._extract_npu_intent(context)
+        if npu_intent:
+            npu_map = {
+                "code": "coder",
+                "debug": "coder",
+                "question": "researcher",
+                "summarize": "reasoner",
+                "greeting": "fast",
+            }
+            if npu_intent in npu_map:
+                self._log(f"Orchestrator: NPU fast-route → {npu_map[npu_intent]} (intent={npu_intent})")
+                return npu_map[npu_intent]
+
         lower = user_input.lower().strip()
 
         security_keywords = [
@@ -228,7 +250,7 @@ class Orchestrator:
             self._log(f"Orchestrator: Reasoning chain failed ({e}), continuing with standard dispatch")
 
         # Fast path
-        fast_agent = self._detect_simple_query(resolved_input)
+        fast_agent = self._detect_simple_query(resolved_input, full_context)
         if fast_agent:
             self._log(f"Orchestrator: Fast-routing to {fast_agent}")
             state.total_steps = 2
@@ -568,7 +590,7 @@ class Orchestrator:
         except Exception as e:
             self._log(f"Orchestrator: Reasoning chain failed ({e})")
 
-        fast_agent = self._detect_simple_query(resolved_input)
+        fast_agent = self._detect_simple_query(resolved_input, full_context)
         if fast_agent:
             self._log(f"Orchestrator: Fast-routing to {fast_agent}")
             state.total_steps = 2

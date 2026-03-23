@@ -628,6 +628,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s: ChatUiState -> s.copy(messages = s.messages + userMsg, inputText = "", isSending = true) }
 
         viewModelScope.launch {
+            // NPU preprocessing — rewrite, classify, and analyze before sending to server
+            var processedText = text
+            if (_state.value.onDeviceEnabled) {
+                try {
+                    val app = getApplication<android.app.Application>()
+                    // Rewrite vague queries for clarity (Gemini Nano on NPU)
+                    val rewritten = com.omniagent.app.ai.OnDeviceAI.rewriteQuery(text)
+                    if (rewritten != text && rewritten.isNotBlank()) {
+                        processedText = rewritten
+                    }
+                    // Classify intent + sentiment — prepend as hints for faster server routing
+                    val intent = com.omniagent.app.ai.OnDeviceAI.classifyIntent(app, text)
+                    val mood = com.omniagent.app.ai.OnDeviceAI.sentiment(text)
+                    // Attach NPU analysis as metadata so server can skip redundant classification
+                    processedText = "[npu:intent=$intent,mood=$mood] $processedText"
+                } catch (_: Throwable) {}
+            }
+
             try {
                 // Stream the response token-by-token
                 val streamingMsg = UiMessage(role = "assistant", content = "", isStreaming = true)
@@ -636,7 +654,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
                 var audioUrl: String? = null
                 api.streamMessage(
-                    message = text,
+                    message = processedText,
                     toolFlags = _state.value.toolToggles,
                     modelOverride = overrideModel ?: _state.value.modelOverride,
                 ).collect { token: String ->
@@ -662,11 +680,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { s: ChatUiState -> s.copy(messages = msgs, isSending = false) }
                 audioUrl?.let { playAudio(it) }
                 generateSmartReplies(fullReply)
+                // Post-response NPU processing — summarize long replies on-device
+                if (_state.value.onDeviceEnabled && fullReply.length > 500) {
+                    viewModelScope.launch {
+                        try {
+                            val summary = com.omniagent.app.ai.OnDeviceAI.summarize(fullReply, 40)
+                            if (summary.isNotBlank() && summary.length < fullReply.length) {
+                                val msgs = _state.value.messages.toMutableList()
+                                val lastIdx = msgs.lastIndex
+                                if (lastIdx >= 0 && msgs[lastIdx].role == "assistant") {
+                                    msgs[lastIdx] = msgs[lastIdx].copy(
+                                        content = msgs[lastIdx].content + "\n\n**TL;DR (on-device):** $summary"
+                                    )
+                                    _state.update { s -> s.copy(messages = msgs) }
+                                }
+                            }
+                        } catch (_: Throwable) {}
+                    }
+                }
             } catch (e: Exception) {
                 // Fallback to non-streaming on error
                 try {
                     val resp = api.sendMessage(
-                        message = text,
+                        message = processedText,
                         toolFlags = _state.value.toolToggles,
                         modelOverride = overrideModel ?: _state.value.modelOverride,
                     )

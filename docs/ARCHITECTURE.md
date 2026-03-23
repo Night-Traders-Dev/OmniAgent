@@ -141,6 +141,51 @@ When SSE blocked by Cloudflare tunnel:
   → same data, different transport
 ```
 
+## On-Device NPU Pipeline (Android)
+
+```
+User types message
+  │
+  ▼ (if NPU enabled)
+┌────────────────────────────────────────┐
+│  Gemini Nano (on Hexagon NPU)          │
+│                                         │
+│  1. tryLocalResponse() ─── greetings,  │
+│     time, device info, general Q&A     │
+│     → if handled: show reply, DONE     │
+│                                         │
+│  2. rewriteQuery() ─── clarify vague   │
+│     queries before server send         │
+│                                         │
+│  3. classifyIntent() ─── code, debug,  │
+│     question, command, greeting, etc.  │
+│                                         │
+│  4. sentiment() ─── positive/negative/ │
+│     neutral mood analysis              │
+│                                         │
+│  5. Prepend [npu:intent=X,mood=Y]      │
+└────────────────────┬───────────────────┘
+                     │
+                     ▼ (sent to server)
+┌────────────────────────────────────────┐
+│  Server: _parse_npu_hints()            │
+│  Strips prefix, injects as context     │
+│  Orchestrator fast-routes by intent:   │
+│    code/debug → coder agent            │
+│    question → researcher agent         │
+│    summarize → reasoner agent          │
+│    greeting → fast agent               │
+└────────────────────┬───────────────────┘
+                     │
+                     ▼ (response received)
+┌────────────────────────────────────────┐
+│  Post-response NPU processing          │
+│  1. summarize() long replies (>500ch)  │
+│     → appends TL;DR on-device          │
+│  2. smartReplies() → suggestion chips  │
+└────────────────────────────────────────┘
+```
+
 ## Database Schema
 
 ```sql
