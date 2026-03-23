@@ -89,7 +89,7 @@ static void get_layout_rows(KBLayout layout, KBRow rows[KB_ROWS]) {
     /* Left action key */
     k = &rows[2].keys[rows[2].count++];
     if (layout == KB_LAYOUT_LOWER || layout == KB_LAYOUT_UPPER) {
-        k->label = layout == KB_LAYOUT_UPPER ? "⬆" : "⇧";
+        k->label = layout == KB_LAYOUT_UPPER ? "CAPS" : "Shift";
         k->output = NULL;
         k->width = 1.5f;
         k->action = KB_ACTION_SHIFT;
@@ -116,7 +116,7 @@ static void get_layout_rows(KBLayout layout, KBRow rows[KB_ROWS]) {
 
     /* Backspace */
     k = &rows[2].keys[rows[2].count++];
-    k->label = "⌫";
+    k->label = "Del";
     k->output = NULL;
     k->width = 1.5f;
     k->action = KB_ACTION_BACKSPACE;
@@ -156,7 +156,7 @@ static void get_layout_rows(KBLayout layout, KBRow rows[KB_ROWS]) {
     k->action = KB_ACTION_CHAR;
 
     k = &rows[3].keys[rows[3].count++];
-    k->label = "⏎";
+    k->label = "Enter";
     k->output = NULL;
     k->width = 1.5f;
     k->action = KB_ACTION_ENTER;

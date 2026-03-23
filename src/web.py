@@ -2385,6 +2385,73 @@ async def hub_discover():
         },
     })
 
+@app.get("/api/hub/news")
+async def hub_news(category: str = "top"):
+    """Fetch news headlines for the Smart Hub Live Area.
+    Categories: top, local, national, global, tech, business."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    from src.tools import web_search, fetch_url
+    import json as _json
+
+    queries = {
+        "top": "top news headlines today",
+        "local": f"local news {_user_location.get('default', {}).get('city', 'US')} today",
+        "national": "US national news today",
+        "global": "world news headlines today",
+        "tech": "technology news today",
+        "business": "stock market business news today",
+    }
+    query = queries.get(category, queries["top"])
+
+    def _fetch():
+        results_raw = web_search(query, max_results=8)
+        try:
+            items = _json.loads(results_raw)
+        except Exception:
+            items = []
+        news = []
+        for item in items[:8]:
+            news.append({
+                "title": item.get("title", ""),
+                "body": item.get("body", "")[:200],
+                "url": item.get("href", ""),
+                "source": item.get("href", "").split("/")[2] if "://" in item.get("href", "") else "",
+            })
+        return news
+
+    news = await loop.run_in_executor(None, _fetch)
+    return JSONResponse({"category": category, "articles": news})
+
+@app.get("/api/hub/markets")
+async def hub_markets():
+    """Fetch market summary for the Smart Hub Live Area."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+    from src.tools import fetch_url
+    import json as _json
+
+    def _fetch():
+        try:
+            raw = fetch_url("https://query1.finance.yahoo.com/v8/finance/chart/?symbols=^GSPC,^IXIC,^DJI,BTC-USD,ETH-USD&range=1d&interval=1d", max_chars=5000)
+            return raw
+        except Exception:
+            return ""
+
+    # Use web search as fallback since Yahoo Finance API may be blocked
+    def _fetch_search():
+        from src.tools import web_search
+        results_raw = web_search("S&P 500 Dow Jones Nasdaq Bitcoin price today", max_results=3)
+        try:
+            items = _json.loads(results_raw)
+            summary = "; ".join(f"{i.get('title','')}" for i in items[:3])
+            return summary
+        except Exception:
+            return "Market data unavailable"
+
+    raw = await loop.run_in_executor(None, _fetch_search)
+    return JSONResponse({"summary": raw, "timestamp": __import__("time").time()})
+
 # --- Upload management ---
 
 class DeleteUploadReq(BaseModel):

@@ -144,6 +144,35 @@ static bool show_session_drawer = false;
 static char smart_chips[MAX_CHIPS][128];
 static int chip_count = 0;
 
+/* Sidebar tabs: Home / News / Markets / Settings */
+typedef enum { TAB_HOME, TAB_NEWS, TAB_MARKETS, TAB_SETTINGS } SidebarTab;
+static SidebarTab sidebar_tab = TAB_HOME;
+
+/* News articles */
+#define MAX_NEWS 8
+typedef struct {
+    char title[256];
+    char source[64];
+    char body[256];
+    char url[512];
+} NewsArticle;
+static NewsArticle news_articles[MAX_NEWS];
+static int news_count = 0;
+static char news_category[32] = "top";
+static Uint32 last_news_time = 0;
+#define NEWS_INTERVAL_MS 300000  /* 5 min */
+
+/* Market data */
+static char market_summary[1024] = "";
+static Uint32 last_market_time = 0;
+#define MARKET_INTERVAL_MS 120000  /* 2 min */
+
+/* Thinking/Reasoning log */
+#define MAX_THINKING 20
+static char thinking_log[MAX_THINKING][256];
+static int thinking_count = 0;
+static bool show_thinking = false;
+
 /* Long-press tracking */
 static Uint32 touch_down_time = 0;
 static int touch_down_x = 0, touch_down_y = 0;
@@ -364,6 +393,72 @@ static void fetch_metrics(void) {
         metrics.gpu_workers = json_get_int(resp, "gpu_workers");
         free(resp);
     }
+
+    /* Fetch reasoning/thinking log (only when a task is active) */
+    if (metrics.status[0] && strcmp(metrics.status, "Idle") != 0 && strcmp(metrics.status, "Finished") != 0) {
+        snprintf(url, sizeof(url), "%s/api/reasoning/history?session_id=%s", server_url, sessionId);
+        resp = http_get(url);
+        if (resp) {
+            /* Parse entries array — look for quoted strings after "entries" */
+            thinking_count = 0;
+            const char *p = strstr(resp, "\"entries\"");
+            if (p) {
+                p = strchr(p, '[');
+                if (p) {
+                    p++;
+                    while (thinking_count < MAX_THINKING) {
+                        const char *q = strchr(p, '"');
+                        if (!q) break;
+                        q++;
+                        const char *end = strchr(q, '"');
+                        if (!end) break;
+                        size_t len = (size_t)(end - q);
+                        if (len >= sizeof(thinking_log[0])) len = sizeof(thinking_log[0]) - 1;
+                        memcpy(thinking_log[thinking_count], q, len);
+                        thinking_log[thinking_count][len] = '\0';
+                        thinking_count++;
+                        p = end + 1;
+                    }
+                }
+            }
+            show_thinking = (thinking_count > 0);
+            free(resp);
+        }
+    } else if (strcmp(metrics.status, "Finished") == 0) {
+        /* Keep showing last thinking log briefly, then clear */
+        show_thinking = (thinking_count > 0);
+    } else {
+        show_thinking = false;
+    }
+}
+
+static void fetch_news(void) {
+    char url[MAX_URL_LEN + 128];
+    snprintf(url, sizeof(url), "%s/api/hub/news?category=%s", server_url, news_category);
+    char *resp = http_get(url);
+    if (!resp) return;
+    news_count = 0;
+    const char *p = resp;
+    while (news_count < MAX_NEWS) {
+        const char *title_key = strstr(p, "\"title\"");
+        if (!title_key) break;
+        json_get_string(title_key - 1, "title", news_articles[news_count].title, sizeof(news_articles[0].title));
+        json_get_string(title_key - 1, "source", news_articles[news_count].source, sizeof(news_articles[0].source));
+        json_get_string(title_key - 1, "body", news_articles[news_count].body, sizeof(news_articles[0].body));
+        json_get_string(title_key - 1, "url", news_articles[news_count].url, sizeof(news_articles[0].url));
+        if (news_articles[news_count].title[0]) news_count++;
+        p = title_key + 7;
+    }
+    free(resp);
+}
+
+static void fetch_markets(void) {
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "%s/api/hub/markets", server_url);
+    char *resp = http_get(url);
+    if (!resp) return;
+    json_get_string(resp, "summary", market_summary, sizeof(market_summary));
+    free(resp);
 }
 
 static void detect_location(void) {
@@ -953,19 +1048,143 @@ static void draw_status_widget(int x, int y, int w) {
     draw_metric_row(mx, row, mw, "Version", ver, COL_DIM);
 }
 
+static void draw_news_panel(int x, int y, int w) {
+    /* Category tabs */
+    const char *cats[] = {"Top", "Local", "National", "Global", NULL};
+    const char *cat_ids[] = {"top", "local", "national", "global"};
+    int cx = x;
+    for (int i = 0; cats[i]; i++) {
+        bool active = (strcmp(news_category, cat_ids[i]) == 0);
+        Color bg = active ? COL_ACCENT : COL_CARD;
+        Color fg = active ? (Color){10,15,25,255} : COL_DIM;
+        int tw = 0; TTF_SizeUTF8(font_small, cats[i], &tw, NULL);
+        draw_rounded_rect(cx, y, tw + 16, 24, 8, bg);
+        draw_text(font_small, cats[i], cx + 8, y + 5, fg);
+        cx += tw + 22;
+    }
+    y += 32;
+
+    /* Articles */
+    for (int i = 0; i < news_count && y < screen_h - 20; i++) {
+        draw_rounded_rect(x, y, w, 54, 6, COL_CARD);
+        /* Source badge */
+        if (news_articles[i].source[0]) {
+            draw_text(font_small, news_articles[i].source, x + 8, y + 4, COL_ACCENT);
+        }
+        /* Title — truncated */
+        char title[100];
+        snprintf(title, sizeof(title), "%.90s", news_articles[i].title);
+        draw_text(font_small, title, x + 8, y + 20, COL_TEXT);
+        /* Snippet */
+        char snip[80];
+        snprintf(snip, sizeof(snip), "%.70s", news_articles[i].body);
+        draw_text(font_small, snip, x + 8, y + 36, COL_DIM);
+        y += 60;
+    }
+    if (news_count == 0) {
+        draw_text(font_regular, "Loading news...", x + 8, y, COL_DIM);
+    }
+}
+
+static void draw_markets_panel(int x, int y, int w) {
+    draw_rounded_rect(x, y, w, 80, 8, COL_CARD);
+    fill_rect(x, y, w, 2, COL_GREEN);
+    draw_text(font_small, "MARKETS", x + 12, y + 8, COL_DIM);
+    if (market_summary[0]) {
+        /* Split summary by semicolons and display each */
+        char buf[1024];
+        snprintf(buf, sizeof(buf), "%s", market_summary);
+        int ly = y + 28;
+        char *line = strtok(buf, ";");
+        while (line && ly < y + 120) {
+            while (*line == ' ') line++;
+            char trunc[80];
+            snprintf(trunc, sizeof(trunc), "%.70s", line);
+            draw_text(font_small, trunc, x + 12, ly, COL_TEXT);
+            ly += 16;
+            line = strtok(NULL, ";");
+        }
+    } else {
+        draw_text(font_regular, "Loading...", x + 12, y + 30, COL_DIM);
+    }
+}
+
+static void draw_settings_panel(int x, int y, int w) {
+    draw_text(font_large, "Settings", x + 8, y, COL_ACCENT);
+    y += 32;
+
+    int rh = 20;
+    draw_metric_row(x + 8, y, w - 16, "Server", server_url, COL_TEXT); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "Session", sessionId, COL_TEXT); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "User", login_state.auth_username[0] ? login_state.auth_username : "guest", COL_TEXT); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "Version", metrics.version[0] ? metrics.version : "--", COL_TEXT); y += rh;
+    y += 8;
+    draw_metric_row(x + 8, y, w - 16, "Ollama", metrics.ollama_online ? "Online" : "Offline",
+                    metrics.ollama_online ? COL_GREEN : COL_RED); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "BitNet", metrics.bitnet_enabled ? "Enabled" : "Off",
+                    metrics.bitnet_enabled ? COL_GREEN : COL_DIM); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "Model", metrics.active_model[0] ? metrics.active_model : "--", COL_ACCENT); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "GPU Workers", metrics.gpu_workers > 0 ? "Connected" : "0",
+                    metrics.gpu_workers > 0 ? COL_GREEN : COL_DIM); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "Location", detected_city[0] ? detected_city : "Unknown", COL_TEXT); y += rh;
+    y += 8;
+
+    char tok_in[32], tok_out[32];
+    snprintf(tok_in, sizeof(tok_in), "%d", metrics.tokens_in);
+    snprintf(tok_out, sizeof(tok_out), "%d", metrics.tokens_out);
+    draw_metric_row(x + 8, y, w - 16, "Tokens In", tok_in, COL_ACCENT); y += rh;
+    draw_metric_row(x + 8, y, w - 16, "Tokens Out", tok_out, COL_ACCENT); y += rh;
+    char tasks[16]; snprintf(tasks, sizeof(tasks), "%d", metrics.tasks_completed);
+    draw_metric_row(x + 8, y, w - 16, "Tasks Done", tasks, COL_TEXT); y += rh;
+    char llm[16]; snprintf(llm, sizeof(llm), "%d", metrics.llm_calls);
+    draw_metric_row(x + 8, y, w - 16, "LLM Calls", llm, COL_TEXT); y += rh;
+}
+
+#define TAB_BAR_H 36
 static void draw_sidebar(void) {
     fill_rect(0, TOPBAR_H, SIDEBAR_W, screen_h - TOPBAR_H, COL_SURFACE);
     fill_rect(SIDEBAR_W - 1, TOPBAR_H, 1, screen_h - TOPBAR_H, COL_BORDER);
 
-    int x = 8, y = TOPBAR_H + 8, w = SIDEBAR_W - 16;
-    draw_weather_widget(x, y, w);
-    y += 138;
-    draw_metrics_widget(x, y, w);
-    y += METRICS_H + 8;
-    draw_actions_widget(x, y, w);
-    y += 168;
-    if (y + 80 < screen_h) {
-        draw_status_widget(x, y, w);
+    /* Tab bar at top of sidebar */
+    int tab_y = TOPBAR_H;
+    const char *tabs[] = {"Home", "News", "Mkt", "Set"};
+    SidebarTab tab_ids[] = {TAB_HOME, TAB_NEWS, TAB_MARKETS, TAB_SETTINGS};
+    int tab_w = SIDEBAR_W / 4;
+    for (int i = 0; i < 4; i++) {
+        bool active = (sidebar_tab == tab_ids[i]);
+        Color bg = active ? (Color){40, 55, 80, 220} : (Color){0,0,0,0};
+        fill_rect(i * tab_w, tab_y, tab_w, TAB_BAR_H, bg);
+        Color fg = active ? COL_ACCENT : COL_DIM;
+        /* Center text */
+        int tw = 0; TTF_SizeUTF8(font_small, tabs[i], &tw, NULL);
+        draw_text(font_small, tabs[i], i * tab_w + (tab_w - tw) / 2, tab_y + 10, fg);
+        if (active) fill_rect(i * tab_w, tab_y + TAB_BAR_H - 2, tab_w, 2, COL_ACCENT);
+    }
+    fill_rect(0, tab_y + TAB_BAR_H, SIDEBAR_W, 1, COL_BORDER);
+
+    int x = 8, y = TOPBAR_H + TAB_BAR_H + 8, w = SIDEBAR_W - 16;
+
+    switch (sidebar_tab) {
+    case TAB_HOME:
+        draw_weather_widget(x, y, w);
+        y += 138;
+        draw_metrics_widget(x, y, w);
+        y += METRICS_H + 8;
+        draw_actions_widget(x, y, w);
+        y += 168;
+        if (y + 110 < screen_h) draw_status_widget(x, y, w);
+        break;
+    case TAB_NEWS:
+        draw_news_panel(x, y, w);
+        break;
+    case TAB_MARKETS:
+        draw_markets_panel(x, y, w);
+        y += 90;
+        draw_news_panel(x, y, w); /* Show business news below markets */
+        break;
+    case TAB_SETTINGS:
+        draw_settings_panel(x, y, w);
+        break;
     }
 }
 
@@ -1038,13 +1257,70 @@ static void draw_chat(void) {
         y += bh + 14;
     }
 
-    /* Sending indicator — pulsing */
-    if (is_sending) {
+    /* Thinking/Reasoning dialogue panel */
+    if (is_sending || show_thinking) {
+        int panel_x = cx + 16;
+        int panel_w = cw - 32;
+        int panel_max_h = 160;
+
+        /* Background panel */
+        draw_rounded_rect(panel_x, y, panel_w, panel_max_h, 12,
+                          (Color){15, 20, 35, 210});
+        /* Accent bar */
+        fill_rect(panel_x, y, panel_w, 2, (Color){100, 140, 220, 180});
+
+        /* Header with pulsing dot */
         float pulse = 0.5f + 0.5f * sinf((float)SDL_GetTicks() * 0.005f);
-        Uint8 alpha = (Uint8)(120 + pulse * 135);
-        Color think_c = {COL_ACCENT.r, COL_ACCENT.g, COL_ACCENT.b, alpha};
-        draw_rounded_rect(cx + 20, y, 140, 36, 12, COL_ASST_BUBBLE);
-        draw_text(font_regular, "Thinking...", cx + 36, y + 8, think_c);
+        Uint8 dot_alpha = (Uint8)(120 + pulse * 135);
+        fill_rect(panel_x + 12, y + 12, 8, 8, (Color){100, 200, 140, dot_alpha});
+        draw_text(font_small, "Thinking...", panel_x + 28, y + 10, COL_ACCENT);
+
+        /* Status line */
+        if (metrics.status[0] && strcmp(metrics.status, "Idle") != 0) {
+            draw_text(font_small, metrics.status, panel_x + 110, y + 10, COL_DIM);
+        }
+        if (metrics.active_model[0]) {
+            char model_str[128];
+            snprintf(model_str, sizeof(model_str), "Model: %s", metrics.active_model);
+            int mw_text = 0;
+            TTF_SizeUTF8(font_small, model_str, &mw_text, NULL);
+            draw_text(font_small, model_str, panel_x + panel_w - mw_text - 12, y + 10, COL_DIM);
+        }
+
+        /* Thinking log entries — show last N that fit */
+        int log_y = y + 30;
+        int log_h = panel_max_h - 38;
+        int line_h = 16;
+        int max_lines = log_h / line_h;
+        int start = thinking_count > max_lines ? thinking_count - max_lines : 0;
+
+        for (int i = start; i < thinking_count; i++) {
+            /* Color-code entries */
+            Color entry_c = COL_DIM;
+            const char *entry = thinking_log[i];
+            if (strstr(entry, "BitNet")) entry_c = (Color){100, 160, 255, 255};  /* Blue */
+            else if (strstr(entry, "NPU")) entry_c = (Color){180, 130, 255, 255}; /* Purple */
+            else if (strstr(entry, "error") || strstr(entry, "Error")) entry_c = COL_RED;
+            else if (strstr(entry, "review") || strstr(entry, "Review")) entry_c = (Color){240, 180, 80, 255}; /* Orange */
+            else if (strstr(entry, "SUCCESS") || strstr(entry, "complete")) entry_c = COL_GREEN;
+            else if (strstr(entry, "tool:")) entry_c = (Color){140, 180, 220, 255}; /* Light blue */
+
+            /* Truncate long entries */
+            char display[128];
+            snprintf(display, sizeof(display), "%.120s", entry);
+            draw_text(font_small, display, panel_x + 12, log_y, entry_c);
+            log_y += line_h;
+        }
+
+        /* If no log entries yet, show waiting animation */
+        if (thinking_count == 0 && is_sending) {
+            int dots = ((SDL_GetTicks() / 400) % 4);
+            char wait[16] = "Waiting";
+            for (int d = 0; d < dots; d++) strcat(wait, ".");
+            draw_text(font_small, wait, panel_x + 12, log_y, COL_DIM);
+        }
+
+        y += panel_max_h + 8;
     }
 
     SDL_RenderSetClipRect(renderer, NULL); /* Remove clip */
@@ -1215,15 +1491,48 @@ static void handle_touch(int x, int y) {
 
     /* Sidebar touches */
     if (x < SIDEBAR_W) {
+        /* Tab bar */
+        if (y >= TOPBAR_H && y < TOPBAR_H + TAB_BAR_H) {
+            int tab_w = SIDEBAR_W / 4;
+            int tab_idx = x / tab_w;
+            SidebarTab tabs[] = {TAB_HOME, TAB_NEWS, TAB_MARKETS, TAB_SETTINGS};
+            if (tab_idx >= 0 && tab_idx < 4) {
+                sidebar_tab = tabs[tab_idx];
+                /* Trigger data fetch for the tab */
+                if (sidebar_tab == TAB_NEWS && news_count == 0) last_news_time = 0;
+                if (sidebar_tab == TAB_MARKETS && !market_summary[0]) last_market_time = 0;
+            }
+            return;
+        }
+
+        /* News tab — category taps */
+        if (sidebar_tab == TAB_NEWS && y >= TOPBAR_H + TAB_BAR_H + 8 && y < TOPBAR_H + TAB_BAR_H + 32) {
+            const char *cat_ids[] = {"top", "local", "national", "global"};
+            int cx_check = 8;
+            const char *cats[] = {"Top", "Local", "National", "Global"};
+            for (int i = 0; i < 4; i++) {
+                int tw = 0; TTF_SizeUTF8(font_small, cats[i], &tw, NULL);
+                if (x >= cx_check && x <= cx_check + tw + 16) {
+                    snprintf(news_category, sizeof(news_category), "%s", cat_ids[i]);
+                    last_news_time = 0; /* Force refresh */
+                    return;
+                }
+                cx_check += tw + 22;
+            }
+            return;
+        }
+
+        if (sidebar_tab != TAB_HOME) return; /* Only Home tab has widgets below */
+
         /* Weather widget tap — refresh now */
-        int wy = TOPBAR_H + 8;
+        int wy = TOPBAR_H + TAB_BAR_H + 8;
         if (y >= wy && y <= wy + 130) {
             last_weather_time = 0; /* triggers fetch on next frame */
             return;
         }
 
         /* Quick action buttons */
-        int ax = 8, ay = TOPBAR_H + 8 + 138 + METRICS_H + 8 + 28;
+        int ax = 8, ay = TOPBAR_H + TAB_BAR_H + 8 + 138 + METRICS_H + 8 + 28;
         int btn_w = (SIDEBAR_W - 32) / 2;
         int btn_h = 44;
         for (int i = 0; i < NUM_ACTIONS; i++) {
@@ -1675,6 +1984,16 @@ int main(int argc, char *argv[]) {
             if (last_weather_time == 0 || now - last_weather_time > WEATHER_INTERVAL_MS) {
                 last_weather_time = now;
                 fetch_weather();
+            }
+            /* News polling */
+            if (last_news_time == 0 || now - last_news_time > NEWS_INTERVAL_MS) {
+                last_news_time = now;
+                fetch_news();
+            }
+            /* Market polling */
+            if (last_market_time == 0 || now - last_market_time > MARKET_INTERVAL_MS) {
+                last_market_time = now;
+                fetch_markets();
             }
         }
 
