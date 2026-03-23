@@ -75,8 +75,12 @@ typedef struct {
     int llm_calls;
     int tokens_in;
     int tokens_out;
+    int session_messages;
+    int commands_run;
+    int context_pct;
     char gpu_temp[32];
     char active_model[64];
+    char status[64];
     bool ollama_online;
     bool bitnet_enabled;
     int gpu_workers;
@@ -308,7 +312,13 @@ static void fetch_metrics(void) {
         metrics.llm_calls = json_get_int(resp, "total_llm_calls");
         metrics.tokens_in = json_get_int(resp, "tokens_in");
         metrics.tokens_out = json_get_int(resp, "tokens_out");
+        metrics.session_messages = json_get_int(resp, "session_messages");
+        metrics.commands_run = json_get_int(resp, "commands_run");
+        metrics.context_pct = json_get_int(resp, "context_usage_pct");
+        metrics.gpu_workers = json_get_int(resp, "gpu_workers");
         json_get_string(resp, "gpu", metrics.gpu_temp, sizeof(metrics.gpu_temp));
+        json_get_string(resp, "active_model", metrics.active_model, sizeof(metrics.active_model));
+        json_get_string(resp, "status", metrics.status, sizeof(metrics.status));
         free(resp);
     }
 
@@ -513,26 +523,75 @@ static void draw_weather_widget(int x, int y, int w) {
     }
 }
 
+#define METRICS_H 200
+
+static void draw_metric_row(int x, int y, int w, const char *label, const char *value, Color val_color) {
+    draw_text(font_small, label, x, y, COL_DIM);
+    /* Right-align value */
+    int vw = 0;
+    TTF_SizeUTF8(font_small, value, &vw, NULL);
+    draw_text(font_small, value, x + w - vw, y, val_color);
+}
+
 static void draw_metrics_widget(int x, int y, int w) {
-    draw_rounded_rect(x, y, w, 90, 8, COL_CARD);
+    draw_rounded_rect(x, y, w, METRICS_H, 8, COL_CARD);
     fill_rect(x, y, w, 2, COL_GREEN);
     draw_text(font_small, "LIVE METRICS", x + 12, y + 8, COL_DIM);
 
-    int col_w = w / 2;
-    char buf[32];
+    int mx = x + 12;
+    int mw = w - 24;
+    int row = y + 26;
+    int rh = 18; /* row height */
+    char buf[64];
 
     snprintf(buf, sizeof(buf), "%d", metrics.tasks_completed);
-    draw_text(font_large, buf, x + col_w/2 - 10, y + 28, COL_TEXT);
-    draw_text(font_small, "Tasks", x + col_w/2 - 14, y + 55, COL_DIM);
+    draw_metric_row(mx, row, mw, "Tasks Completed", buf, COL_TEXT);
+    row += rh;
 
     snprintf(buf, sizeof(buf), "%d", metrics.llm_calls);
-    draw_text(font_large, buf, x + col_w + col_w/2 - 10, y + 28, COL_TEXT);
-    draw_text(font_small, "LLM Calls", x + col_w + col_w/2 - 22, y + 55, COL_DIM);
+    draw_metric_row(mx, row, mw, "LLM Calls", buf, COL_TEXT);
+    row += rh;
 
-    char tokens[64];
-    snprintf(tokens, sizeof(tokens), "In: %dk  Out: %dk",
-        metrics.tokens_in / 1000, metrics.tokens_out / 1000);
-    draw_text(font_small, tokens, x + 12, y + 72, COL_DIM);
+    snprintf(buf, sizeof(buf), "%d", metrics.session_messages);
+    draw_metric_row(mx, row, mw, "Session Messages", buf, COL_TEXT);
+    row += rh;
+
+    snprintf(buf, sizeof(buf), "%d", metrics.commands_run);
+    draw_metric_row(mx, row, mw, "Commands Run", buf, COL_TEXT);
+    row += rh;
+
+    snprintf(buf, sizeof(buf), "%,d", metrics.tokens_in);
+    draw_metric_row(mx, row, mw, "Tokens In", buf, COL_ACCENT);
+    row += rh;
+
+    snprintf(buf, sizeof(buf), "%,d", metrics.tokens_out);
+    draw_metric_row(mx, row, mw, "Tokens Out", buf, COL_ACCENT);
+    row += rh;
+
+    /* GPU temp */
+    const char *gpu = (metrics.gpu_temp[0] && strcmp(metrics.gpu_temp, "--") != 0)
+                      ? metrics.gpu_temp : "N/A";
+    Color gpu_c = COL_TEXT;
+    if (strstr(gpu, "N/A") == NULL) gpu_c = COL_YELLOW;
+    draw_metric_row(mx, row, mw, "GPU", gpu, gpu_c);
+    row += rh;
+
+    /* GPU Workers */
+    snprintf(buf, sizeof(buf), "%d", metrics.gpu_workers);
+    draw_metric_row(mx, row, mw, "GPU Workers", buf, COL_TEXT);
+    row += rh;
+
+    /* Context usage bar */
+    draw_text(font_small, "Context", mx, row, COL_DIM);
+    int bar_x = mx + 60;
+    int bar_w = mw - 80;
+    int bar_h = 10;
+    fill_rect(bar_x, row + 2, bar_w, bar_h, COL_BORDER);
+    int fill_w = (int)(bar_w * metrics.context_pct / 100.0f);
+    Color bar_c = metrics.context_pct > 80 ? COL_RED : (metrics.context_pct > 50 ? COL_YELLOW : COL_GREEN);
+    fill_rect(bar_x, row + 2, fill_w, bar_h, bar_c);
+    snprintf(buf, sizeof(buf), "%d%%", metrics.context_pct);
+    draw_text(font_small, buf, bar_x + bar_w + 4, row, COL_DIM);
 }
 
 static void draw_actions_widget(int x, int y, int w) {
@@ -554,22 +613,37 @@ static void draw_actions_widget(int x, int y, int w) {
 }
 
 static void draw_status_widget(int x, int y, int w) {
-    draw_rounded_rect(x, y, w, 80, 8, COL_CARD);
+    draw_rounded_rect(x, y, w, 110, 8, COL_CARD);
     fill_rect(x, y, w, 2, COL_YELLOW);
     draw_text(font_small, "SERVER", x + 12, y + 8, COL_DIM);
 
-    Color oc = metrics.ollama_online ? COL_GREEN : COL_RED;
-    draw_text(font_small, "Ollama", x + 12, y + 28, COL_DIM);
-    draw_text(font_small, metrics.ollama_online ? "Online" : "Offline", x + w - 80, y + 28, oc);
+    int mx = x + 12, mw = w - 24, row = y + 26, rh = 16;
 
-    Color bc = metrics.bitnet_enabled ? COL_GREEN : COL_DIM;
-    draw_text(font_small, "BitNet", x + 12, y + 44, COL_DIM);
-    draw_text(font_small, metrics.bitnet_enabled ? "On" : "Off", x + w - 80, y + 44, bc);
+    draw_metric_row(mx, row, mw, "Ollama",
+        metrics.ollama_online ? "Online" : "Offline",
+        metrics.ollama_online ? COL_GREEN : COL_RED);
+    row += rh;
 
-    char wk[16];
-    snprintf(wk, sizeof(wk), "%d", metrics.gpu_workers);
-    draw_text(font_small, "Workers", x + 12, y + 60, COL_DIM);
-    draw_text(font_small, wk, x + w - 80, y + 60, COL_TEXT);
+    draw_metric_row(mx, row, mw, "BitNet",
+        metrics.bitnet_enabled ? "Enabled" : "Off",
+        metrics.bitnet_enabled ? COL_GREEN : COL_DIM);
+    row += rh;
+
+    /* Active model */
+    const char *model = metrics.active_model[0] ? metrics.active_model : "--";
+    draw_metric_row(mx, row, mw, "Model", model, COL_ACCENT);
+    row += rh;
+
+    /* Current status */
+    const char *st = metrics.status[0] ? metrics.status : "Idle";
+    Color st_c = COL_DIM;
+    if (strcmp(st, "Idle") != 0 && strcmp(st, "Finished") != 0) st_c = COL_GREEN;
+    draw_metric_row(mx, row, mw, "Status", st, st_c);
+    row += rh;
+
+    /* Version */
+    const char *ver = metrics.version[0] ? metrics.version : "--";
+    draw_metric_row(mx, row, mw, "Version", ver, COL_DIM);
 }
 
 static void draw_sidebar(void) {
@@ -580,10 +654,12 @@ static void draw_sidebar(void) {
     draw_weather_widget(x, y, w);
     y += 138;
     draw_metrics_widget(x, y, w);
-    y += 98;
+    y += METRICS_H + 8;
     draw_actions_widget(x, y, w);
     y += 168;
-    draw_status_widget(x, y, w);
+    if (y + 80 < screen_h) {
+        draw_status_widget(x, y, w);
+    }
 }
 
 static void draw_chat(void) {
@@ -739,7 +815,7 @@ static void handle_touch(int x, int y) {
         }
 
         /* Quick action buttons */
-        int ax = 8, ay = TOPBAR_H + 8 + 138 + 98 + 28;
+        int ax = 8, ay = TOPBAR_H + 8 + 138 + METRICS_H + 8 + 28;
         int btn_w = (SIDEBAR_W - 32) / 2;
         int btn_h = 44;
         for (int i = 0; i < NUM_ACTIONS; i++) {
