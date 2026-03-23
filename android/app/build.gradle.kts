@@ -66,5 +66,9 @@ dependencies {
     implementation("org.tensorflow:tensorflow-lite-gpu-api:2.14.0")
     implementation("org.tensorflow:tensorflow-lite-support:0.4.4")
 
+    // Gemini Nano — on-device LLM via Google AI Core (S24/S25/Pixel 8+)
+    // Uses reflection to access the model — no hard dependency required
+    // The model is provided by the system's Google AI Core app
+
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

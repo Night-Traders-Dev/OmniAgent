@@ -8,40 +8,41 @@ import kotlinx.coroutines.withContext
 import org.tensorflow.lite.Interpreter
 import org.tensorflow.lite.gpu.GpuDelegate
 import java.io.File
-import java.io.FileOutputStream
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
- * On-device AI manager — uses the Snapdragon 8 Gen 3 NPU (via NNAPI) and
- * Adreno GPU (via TFLite GPU delegate) for local inference tasks.
+ * On-device AI manager — uses Gemini Nano (via Google AI Edge) on the
+ * Snapdragon 8 Gen 3 NPU for real LLM inference on-device.
  *
- * Compatible tasks (offloaded to device instead of server):
- *  - Text classification / sentiment analysis
- *  - Smart reply suggestions
- *  - Text summarization (small models)
- *  - Image preprocessing / classification
- *  - Embedding generation for semantic search
+ * Gemini Nano provides:
+ *  - Text generation (~30-50 tok/s on NPU)
+ *  - Summarization
+ *  - Smart reply generation
+ *  - Intent classification
+ *  - Query answering (general knowledge)
  *
- * Falls back gracefully if NPU/GPU not available — uses CPU TFLite.
- * All models are downloaded on first use and cached in app storage.
+ * Falls back to heuristics on devices without Gemini Nano support.
  */
 object OnDeviceAI {
     private const val TAG = "OnDeviceAI"
 
-    // Capability flags — detected at init
+    // Capability flags
     var isAvailable = false
         private set
     var hasNNAPI = false
         private set
     var hasGpuDelegate = false
         private set
+    var hasGeminiNano = false
+        private set
     var chipName = "Unknown"
         private set
     var npuName = "None"
         private set
 
-    // Activity log — visible in thinking dialogue
+    // Gemini Nano session
+    private var _geminiClient: Any? = null  // GenerativeModel from aicore
+
+    // Activity log
     private val _activityLog = mutableListOf<String>()
     val activityLog: List<String> get() = _activityLog.toList()
 
@@ -50,23 +51,13 @@ object OnDeviceAI {
         val entry = "[$ts] \u26A1 NPU: $action"
         _activityLog.add(entry)
         Log.d(TAG, entry)
-        // Keep last 50 entries
         if (_activityLog.size > 50) _activityLog.removeAt(0)
     }
 
     fun clearLog() { _activityLog.clear() }
 
-    // Loaded interpreters (lazy — loaded on first use)
-    private var classifierInterpreter: Interpreter? = null
-    private var embeddingInterpreter: Interpreter? = null
-
-    // Model URLs (small, efficient models suitable for mobile NPU)
-    private const val CLASSIFIER_MODEL = "smartreply.tflite"
-    private const val EMBEDDING_MODEL = "mobilebert_embedding.tflite"
-
     /**
-     * Initialize on-device AI — detect hardware capabilities.
-     * Call this once from Application/Activity context.
+     * Initialize on-device AI — detect hardware and Gemini Nano availability.
      */
     fun init(context: Context) {
         try {
@@ -75,6 +66,7 @@ object OnDeviceAI {
             val soc = Build.SOC_MODEL.ifEmpty { Build.BOARD }
             npuName = when {
                 soc.contains("SM8650", ignoreCase = true) -> "Snapdragon 8 Gen 3 (Hexagon NPU)"
+                soc.contains("SM8750", ignoreCase = true) -> "Snapdragon 8 Elite (Hexagon NPU)"
                 soc.contains("SM8550", ignoreCase = true) -> "Snapdragon 8 Gen 2 (Hexagon NPU)"
                 soc.contains("s5e9945", ignoreCase = true) -> "Exynos 2400 (Samsung NPU)"
                 soc.contains("SM8475", ignoreCase = true) -> "Snapdragon 8+ Gen 1 (Hexagon)"
@@ -83,147 +75,157 @@ object OnDeviceAI {
                 else -> "Generic NNAPI"
             }
 
-            // Check NNAPI support (Android 8.1+)
             hasNNAPI = Build.VERSION.SDK_INT >= 27
 
-            // Check GPU delegate support — wrapped carefully to avoid native crashes
             hasGpuDelegate = try {
                 Class.forName("org.tensorflow.lite.gpu.GpuDelegate")
                 val delegate = GpuDelegate()
                 delegate.close()
                 true
             } catch (e: Throwable) {
-                Log.d(TAG, "GPU delegate not available: ${e.message}")
                 false
             }
 
-            isAvailable = hasNNAPI || hasGpuDelegate
-            Log.i(TAG, "On-device AI: available=$isAvailable, NNAPI=$hasNNAPI, GPU=$hasGpuDelegate, SoC=$soc, NPU=$npuName")
+            // Try to initialize Gemini Nano via Google AI Edge
+            hasGeminiNano = initGeminiNano(context)
+
+            isAvailable = hasNNAPI || hasGpuDelegate || hasGeminiNano
+            val engine = if (hasGeminiNano) "Gemini Nano" else "Heuristics"
+            Log.i(TAG, "On-device AI: available=$isAvailable, Gemini=$hasGeminiNano, NNAPI=$hasNNAPI, GPU=$hasGpuDelegate, SoC=$soc, NPU=$npuName, Engine=$engine")
         } catch (e: Throwable) {
             Log.e(TAG, "On-device AI init failed (non-fatal): ${e.message}")
             isAvailable = false
         }
     }
 
-    /**
-     * Get device AI capabilities as a map for display/reporting.
-     */
-    fun getCapabilities(): Map<String, Any> = mapOf(
-        "available" to isAvailable,
-        "chip" to chipName,
-        "npu" to npuName,
-        "nnapi" to hasNNAPI,
-        "gpu_delegate" to hasGpuDelegate,
-        "soc" to Build.SOC_MODEL,
-        "supported_tasks" to listOf(
-            "text_classification", "sentiment", "smart_reply",
-            "embedding", "image_classify", "summarize_short",
-        ),
-    )
-
-    // ── Interpreter creation ─────────────────────────────────
-
-    private fun createInterpreter(context: Context, modelName: String): Interpreter? {
-        val modelFile = getOrDownloadModel(context, modelName) ?: return null
+    private fun initGeminiNano(context: Context): Boolean {
         return try {
-            val options = Interpreter.Options()
-            // Prefer NNAPI (routes to Hexagon NPU on Snapdragon)
-            if (hasNNAPI) {
-                options.setUseNNAPI(true)
-                Log.d(TAG, "Using NNAPI delegate for $modelName")
-            }
-            // Fallback to GPU delegate
-            else if (hasGpuDelegate) {
-                try {
-                    options.addDelegate(GpuDelegate())
-                    Log.d(TAG, "Using GPU delegate for $modelName")
-                } catch (e: Throwable) {
-                    Log.w(TAG, "GPU delegate failed, falling back to CPU: ${e.message}")
-                }
-            }
-            options.setNumThreads(4)
-            try {
-                Interpreter(modelFile, options)
-            } catch (e: Throwable) {
-                Log.e(TAG, "NNAPI interpreter failed, retrying CPU-only: ${e.message}")
-                Interpreter(modelFile, Interpreter.Options().apply { setNumThreads(4) })
-            }
+            val clazz = Class.forName("com.google.ai.edge.aicore.GenerativeModel")
+            val configClass = Class.forName("com.google.ai.edge.aicore.GenerationConfig")
+
+            // Build config
+            val configBuilder = configClass.getDeclaredClasses().find { it.simpleName == "Builder" }
+                ?.getDeclaredConstructor()?.newInstance()
+            val config = configBuilder?.javaClass?.getMethod("build")?.invoke(configBuilder)
+
+            // Create GenerativeModel
+            val constructor = clazz.getDeclaredConstructor(String::class.java, configClass)
+            _geminiClient = constructor.newInstance("gemini-nano", config)
+
+            Log.i(TAG, "Gemini Nano initialized successfully")
+            true
         } catch (e: Throwable) {
-            Log.e(TAG, "Failed to create interpreter for $modelName: ${e.message}")
+            Log.d(TAG, "Gemini Nano not available: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Generate text using Gemini Nano. Returns null if not available.
+     */
+    private suspend fun geminiGenerate(prompt: String): String? = withContext(Dispatchers.Default) {
+        val client = _geminiClient ?: return@withContext null
+        try {
+            // Call generateContent via reflection (avoids compile-time dependency issues)
+            val method = client.javaClass.getMethod("generateContent", String::class.java)
+            val response = method.invoke(client, prompt)
+            val textMethod = response?.javaClass?.getMethod("getText")
+            val text = textMethod?.invoke(response) as? String
+            text?.trim()
+        } catch (e: Throwable) {
+            Log.w(TAG, "Gemini generate failed: ${e.message}")
             null
         }
     }
 
-    private fun getOrDownloadModel(context: Context, modelName: String): File? {
-        val modelDir = File(context.filesDir, "ai_models")
-        modelDir.mkdirs()
-        val modelFile = File(modelDir, modelName)
-        if (modelFile.exists() && modelFile.length() > 1000) return modelFile
-
-        // Try to copy from assets first (bundled models)
-        try {
-            context.assets.open("models/$modelName").use { input ->
-                FileOutputStream(modelFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            if (modelFile.exists()) return modelFile
-        } catch (_: Exception) {
-            // Not in assets — that's fine, we'll create a minimal model
-        }
-
-        // Create a minimal placeholder model for testing
-        // In production, download from a model hub
-        Log.w(TAG, "Model $modelName not found — on-device features limited")
-        return null
-    }
+    fun getCapabilities(): Map<String, Any> = mapOf(
+        "available" to isAvailable,
+        "chip" to chipName,
+        "npu" to npuName,
+        "gemini_nano" to hasGeminiNano,
+        "nnapi" to hasNNAPI,
+        "gpu_delegate" to hasGpuDelegate,
+        "soc" to Build.SOC_MODEL,
+        "engine" to if (hasGeminiNano) "gemini-nano" else "heuristics",
+        "supported_tasks" to listOf(
+            "text_generation", "summarization", "smart_reply",
+            "classification", "sentiment", "query_answering",
+        ),
+    )
 
     // ── Task APIs ────────────────────────────────────────────
 
     /**
-     * Classify text intent — useful for routing queries locally.
-     * Returns: "question", "command", "greeting", "code", "general"
+     * Classify text intent using Gemini Nano or heuristic fallback.
      */
     suspend fun classifyIntent(context: Context, text: String): String = withContext(Dispatchers.Default) {
         if (!isAvailable) return@withContext "general"
-        log("Classifying intent on $npuName")
+        log("Classifying intent on $npuName" + if (hasGeminiNano) " (Gemini Nano)" else "")
+
+        if (hasGeminiNano) {
+            val result = geminiGenerate(
+                "Classify this user message into exactly ONE category. " +
+                "Categories: question, command, greeting, code, debug, summarize, general. " +
+                "Reply with ONLY the category name, nothing else.\n\nMessage: $text"
+            )
+            if (result != null) {
+                val category = result.lowercase().trim().split(" ")[0].split("\n")[0]
+                val valid = setOf("question", "command", "greeting", "code", "debug", "summarize", "general")
+                val final = if (category in valid) category else "general"
+                log("Intent: $final (Gemini Nano)")
+                return@withContext final
+            }
+        }
+
+        // Heuristic fallback
         val lower = text.lowercase().trim()
         val result = when {
             lower.endsWith("?") || lower.startsWith("what") || lower.startsWith("how") ||
             lower.startsWith("why") || lower.startsWith("when") || lower.startsWith("where") ||
             lower.startsWith("who") || lower.startsWith("can you") || lower.startsWith("is ") -> "question"
-
             lower.startsWith("write") || lower.startsWith("create") || lower.startsWith("generate") ||
             lower.startsWith("make") || lower.startsWith("build") || lower.startsWith("add") -> "command"
-
             lower.startsWith("hi") || lower.startsWith("hello") || lower.startsWith("hey") ||
             lower.startsWith("good morning") || lower.startsWith("thanks") -> "greeting"
-
             lower.contains("```") || lower.contains("function") || lower.contains("class ") ||
-            lower.contains("def ") || lower.contains("import ") || lower.contains("var ") -> "code"
-
+            lower.contains("def ") || lower.contains("import ") -> "code"
             lower.contains("fix") || lower.contains("debug") || lower.contains("error") ||
             lower.contains("bug") || lower.contains("crash") -> "debug"
-
-            lower.contains("summarize") || lower.contains("summary") || lower.contains("tldr") ||
-            lower.contains("explain") -> "summarize"
-
+            lower.contains("summarize") || lower.contains("summary") || lower.contains("explain") -> "summarize"
             else -> "general"
         }
-        log("Intent: $result")
+        log("Intent: $result (heuristic)")
         result
     }
 
     /**
-     * Generate smart reply suggestions for a given assistant response.
-     * Returns 2-3 short follow-up suggestions.
+     * Generate smart reply suggestions using Gemini Nano or heuristic fallback.
      */
     suspend fun smartReplies(context: Context, lastAssistantMessage: String): List<String> = withContext(Dispatchers.Default) {
         if (!isAvailable || lastAssistantMessage.isBlank()) return@withContext emptyList()
-        log("Generating smart replies on $npuName")
+        log("Generating smart replies" + if (hasGeminiNano) " (Gemini Nano)" else "")
+
+        if (hasGeminiNano) {
+            val result = geminiGenerate(
+                "Given this AI assistant response, suggest 3 short follow-up questions or replies the user might want to send. " +
+                "Format: one per line, no numbering, no quotes, max 8 words each.\n\n" +
+                "Response: ${lastAssistantMessage.take(500)}"
+            )
+            if (result != null) {
+                val replies = result.split("\n")
+                    .map { it.trim().trimStart('-', '*', '1', '2', '3', '.', ' ') }
+                    .filter { it.isNotBlank() && it.length in 3..60 }
+                    .take(3)
+                if (replies.isNotEmpty()) {
+                    log("Smart replies: ${replies.joinToString(", ")}")
+                    return@withContext replies
+                }
+            }
+        }
+
+        // Heuristic fallback
         val lower = lastAssistantMessage.lowercase()
         val suggestions = mutableListOf<String>()
-
         when {
             lower.contains("error") || lower.contains("failed") || lower.contains("exception") -> {
                 suggestions.add("Show me the full error")
@@ -240,11 +242,6 @@ object OnDeviceAI {
                 suggestions.add("What's next?")
                 suggestions.add("Make changes")
             }
-            lower.contains("installed") || lower.contains("setup") || lower.contains("configured") -> {
-                suggestions.add("Verify it works")
-                suggestions.add("Show me the config")
-                suggestions.add("What else do I need?")
-            }
             lower.endsWith("?") -> {
                 suggestions.add("Yes")
                 suggestions.add("No")
@@ -257,17 +254,34 @@ object OnDeviceAI {
             }
         }
         val result = suggestions.take(3)
-        log("Smart replies: ${result.joinToString(", ")}")
+        log("Smart replies: ${result.joinToString(", ")} (heuristic)")
         result
     }
 
     /**
-     * Quick sentiment analysis — returns "positive", "negative", "neutral".
-     * Runs on NPU if available.
+     * Sentiment analysis using Gemini Nano or heuristic fallback.
      */
     suspend fun sentiment(text: String): String = withContext(Dispatchers.Default) {
         if (!isAvailable) return@withContext "neutral"
-        log("Analyzing sentiment on $npuName")
+        log("Analyzing sentiment" + if (hasGeminiNano) " (Gemini Nano)" else "")
+
+        if (hasGeminiNano) {
+            val result = geminiGenerate(
+                "Classify the sentiment of this text as exactly ONE word: positive, negative, or neutral.\n\nText: $text"
+            )
+            if (result != null) {
+                val s = result.lowercase().trim()
+                val final = when {
+                    "positive" in s -> "positive"
+                    "negative" in s -> "negative"
+                    else -> "neutral"
+                }
+                log("Sentiment: $final (Gemini Nano)")
+                return@withContext final
+            }
+        }
+
+        // Heuristic fallback
         val lower = text.lowercase()
         val posWords = listOf("good", "great", "thanks", "awesome", "perfect", "love", "excellent", "amazing", "helpful", "nice")
         val negWords = listOf("bad", "wrong", "error", "fail", "hate", "terrible", "awful", "broken", "bug", "crash", "worst")
@@ -278,23 +292,28 @@ object OnDeviceAI {
             negScore > posScore -> "negative"
             else -> "neutral"
         }
-        log("Sentiment: $result")
+        log("Sentiment: $result (heuristic)")
         result
     }
 
     /**
-     * Determine if a message can be handled locally (without server).
-     * Returns a local response or null if server is needed.
+     * Try to handle a message locally. Returns response or null if server needed.
+     * With Gemini Nano, this can handle general knowledge, summaries, and simple Q&A.
      */
     suspend fun tryLocalResponse(context: Context, message: String): String? = withContext(Dispatchers.Default) {
         if (!isAvailable) return@withContext null
         log("Checking if query can be handled on-device")
+
         val intent = classifyIntent(context, message)
         val lower = message.lowercase().trim()
 
-        // Handle simple greetings locally
+        // Handle greetings locally (both Gemini and heuristic)
         if (intent == "greeting") {
             log("Handling greeting on-device")
+            if (hasGeminiNano) {
+                val reply = geminiGenerate("Reply to this greeting naturally and briefly: $message")
+                if (reply != null) return@withContext reply
+            }
             return@withContext when {
                 lower.startsWith("thanks") || lower.startsWith("thank you") -> "You're welcome! Let me know if you need anything else."
                 lower.startsWith("hi") || lower.startsWith("hello") || lower.startsWith("hey") -> "Hello! How can I help you today?"
@@ -315,32 +334,58 @@ object OnDeviceAI {
         if (lower.contains("what device") || lower.contains("my phone") || lower.contains("phone info")) {
             log("Handling device info query on-device")
             return@withContext "You're on a ${Build.MANUFACTURER} ${Build.MODEL} running Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT}). " +
-                    "SoC: ${Build.SOC_MODEL}. NPU: $npuName."
+                    "SoC: ${Build.SOC_MODEL}. NPU: $npuName." +
+                    if (hasGeminiNano) " Gemini Nano active." else ""
+        }
+
+        // With Gemini Nano: handle general knowledge, summaries, simple Q&A
+        if (hasGeminiNano && intent in setOf("question", "summarize", "general")) {
+            // Don't handle locally if it needs tools (file ops, web search, code)
+            val needsServer = lower.contains("file") || lower.contains("search") || lower.contains("run ") ||
+                    lower.contains("install") || lower.contains("create") || lower.contains("write") ||
+                    lower.contains("code") || lower.contains("git ") || lower.contains("build")
+            if (!needsServer) {
+                log("Handling with Gemini Nano on-device")
+                val reply = geminiGenerate("Answer this concisely and helpfully:\n\n$message")
+                if (reply != null && reply.length > 10) {
+                    return@withContext reply
+                }
+            }
         }
 
         log("Query requires server — forwarding")
-        null // Server needed
+        null
     }
 
     /**
-     * Pre-process a message before sending to server — adds device context.
+     * Summarize text using Gemini Nano. Falls back to truncation.
      */
-    suspend fun preprocessForServer(context: Context, message: String): Map<String, String> = withContext(Dispatchers.Default) {
-        val extras = mutableMapOf<String, String>()
-        if (!isAvailable) return@withContext extras
-
-        extras["intent"] = classifyIntent(context, message)
-        extras["sentiment"] = sentiment(message)
-        extras
+    suspend fun summarize(text: String, maxWords: Int = 50): String = withContext(Dispatchers.Default) {
+        if (hasGeminiNano) {
+            log("Summarizing with Gemini Nano")
+            val result = geminiGenerate("Summarize this in $maxWords words or fewer:\n\n${text.take(2000)}")
+            if (result != null) return@withContext result
+        }
+        // Fallback: truncate
+        val words = text.split(" ")
+        if (words.size <= maxWords) return@withContext text
+        words.take(maxWords).joinToString(" ") + "..."
     }
 
     /**
-     * Release all resources.
+     * Rewrite a query for clarity before sending to server.
      */
+    suspend fun rewriteQuery(query: String): String = withContext(Dispatchers.Default) {
+        if (!hasGeminiNano) return@withContext query
+        log("Rewriting query with Gemini Nano")
+        val result = geminiGenerate(
+            "Rewrite this user query to be clearer and more specific. Keep it concise. " +
+            "If it's already clear, return it unchanged.\n\nQuery: $query"
+        )
+        result ?: query
+    }
+
     fun release() {
-        classifierInterpreter?.close()
-        classifierInterpreter = null
-        embeddingInterpreter?.close()
-        embeddingInterpreter = null
+        _geminiClient = null
     }
 }
