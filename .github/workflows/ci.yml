@@ -15,9 +15,7 @@ jobs:
         with:
           python-version: '3.13'
       - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest
+        run: pip install -r requirements-ci.txt
       - name: Lint
         run: python -m py_compile src/web.py src/tools.py src/mcp.py src/persistence.py src/agents/orchestrator.py src/agents/base.py
       - name: Run tests
@@ -55,6 +53,8 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libjavascriptcoregtk-4.1-dev
       - name: Install Tauri CLI
         run: cargo install tauri-cli
+      - name: Create frontend dist
+        run: mkdir -p desktop/dist && cp desktop/dist/index.html desktop/dist/index.html 2>/dev/null || echo '<html><script>window.location.replace("http://localhost:8000")</script></html>' > desktop/dist/index.html
       - name: Build desktop (deb + rpm)
         working-directory: desktop
         run: cargo tauri build --bundles deb,rpm
@@ -80,6 +80,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install Tauri CLI
         run: cargo install tauri-cli
+      - name: Create frontend dist
+        shell: bash
+        run: mkdir -p desktop/dist && echo '<html><script>window.location.replace("http://localhost:8000")</script></html>' > desktop/dist/index.html
       - name: Build desktop (msi + nsis)
         working-directory: desktop
         run: cargo tauri build --bundles msi,nsis

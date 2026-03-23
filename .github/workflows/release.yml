@@ -63,6 +63,8 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
       - name: Install Tauri CLI
         run: cargo install tauri-cli
+      - name: Create frontend dist
+        run: mkdir -p desktop/dist && echo '<html><script>window.location.replace("http://localhost:8000")</script></html>' > desktop/dist/index.html
       - name: Build
         working-directory: desktop
         run: cargo tauri build --bundles deb,rpm
@@ -92,6 +94,9 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
       - name: Install Tauri CLI
         run: cargo install tauri-cli
+      - name: Create frontend dist
+        shell: bash
+        run: mkdir -p desktop/dist && echo '<html><script>window.location.replace("http://localhost:8000")</script></html>' > desktop/dist/index.html
       - name: Build
         working-directory: desktop
         run: cargo tauri build --bundles msi,nsis

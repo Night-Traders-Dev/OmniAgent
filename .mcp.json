@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "omniagent": {
+      "command": "python",
+      "args": ["/home/kraken/Devel/OmniAgent/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/home/kraken/Devel/OmniAgent"
+      }
+    }
+  }
+}
