@@ -516,8 +516,9 @@
         <textarea id="msg" rows="1" placeholder="Enter task... (Ctrl+Enter to send)" oninput="autoResize(this)"></textarea>
         <button class="upload-btn" onclick="toggleSearch()" title="Search messages" style="font-size:.75rem">&#x1F50D;</button>
         <button id="send-btn" onclick="send()">GO</button>
+        <button id="stop-btn" onclick="stopGenerating()" style="display:none;background:var(--red);border:none;color:white;padding:10px 14px;border-radius:8px;cursor:pointer;font-size:.85rem">Stop</button>
     </div>
-    <div class="shortcut-hint">Ctrl+Enter to send &middot; Esc to cancel &middot; / to focus &middot; Ctrl+F to search</div>
+    <div class="shortcut-hint">Ctrl+Enter to send &middot; Esc to cancel &middot; / to focus &middot; Ctrl+F to search &middot; Double-click to edit</div>
 
     <script>
         const chat = document.getElementById('chat');
@@ -1454,9 +1455,13 @@
             brBtn.onmouseover=()=>brBtn.style.opacity='1';brBtn.onmouseout=()=>brBtn.style.opacity='0.3';
             brBtn.onclick=()=>branchFromMessage(msgIdx);
             ub.style.position='relative';ub.appendChild(brBtn);
-            chat.appendChild(ub);chat.scrollTop=chat.scrollHeight;
+            addTimestamp(ub);
+            chat.appendChild(ub);if(autoScroll)chat.scrollTop=chat.scrollHeight;
             document.getElementById('send-btn').disabled=true;
+            document.getElementById('send-btn').style.display='none';
+            document.getElementById('stop-btn').style.display='inline-block';
             isSending=true;
+            _currentAbort = new AbortController();
             // Proactively request location if the message looks location-dependent
             await ensureLocation(v);
             const toolFlags={};document.querySelectorAll('.toggle-chip[data-tool]').forEach(c=>{toolFlags[c.dataset.tool]=c.classList.contains('on');});
@@ -1480,7 +1485,7 @@
                                 if(d.location_needed){ensureLocation(v);}
                                 if(d.audio_url){playAudioResponse(d.audio_url);}
                                 if(d.token){full+=d.token;ob.innerHTML=renderMarkdown(full);addCopyButtons(ob);chat.scrollTop=chat.scrollHeight;}
-                                if(d.done){finalizeThinking();ob.innerHTML=renderMarkdown(full);addCopyButtons(ob);renderPostProcess(ob);addConfidenceBadge(ob,full);notifyTaskComplete(full);showSmartReplies(full);}
+                                if(d.done){finalizeThinking();ob.innerHTML=renderMarkdown(full);addCopyButtons(ob);renderPostProcess(ob);addConfidenceBadge(ob,full);addTimestamp(ob);addCopyAllButton(ob);notifyTaskComplete(full);showSmartReplies(full);}
                             }catch(e){}
                         }
                     }
@@ -1489,13 +1494,15 @@
                 try{
                     const r=await fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body});
                     const data=await r.json();finalizeThinking();
-                    const ob=document.createElement('div');ob.className='bubble omni';ob.innerHTML=renderMarkdown(data.reply);addCopyButtons(ob);renderPostProcess(ob);addConfidenceBadge(ob,data.reply);
+                    const ob=document.createElement('div');ob.className='bubble omni';ob.innerHTML=renderMarkdown(data.reply);addCopyButtons(ob);renderPostProcess(ob);addConfidenceBadge(ob,data.reply);addTimestamp(ob);addCopyAllButton(ob);
                     chat.appendChild(ob);chat.scrollTop=chat.scrollHeight;
                     if(data.audio_url){playAudioResponse(data.audio_url);}
                     notifyTaskComplete(data.reply);showSmartReplies(data.reply);
                 }catch(err){finalizeThinking();const eb=document.createElement('div');eb.className='bubble omni';eb.style.borderColor='var(--red)';eb.textContent='Error: '+err.message;chat.appendChild(eb);}
             }
             document.getElementById('send-btn').disabled=false;
+            document.getElementById('send-btn').style.display='inline-block';
+            document.getElementById('stop-btn').style.display='none';
             isSending=false;
             lastKnownMsgCount=document.querySelectorAll('#chat .bubble').length;
             chat.scrollTop=chat.scrollHeight;
@@ -1988,6 +1995,81 @@
                 () => {}, // silently ignore denial
                 {enableHighAccuracy: false, timeout: 10000}
             );
+        }
+
+        // --- Stop Generating ---
+        let _currentAbort = null;
+        function stopGenerating() {
+            if (_currentAbort) { _currentAbort.abort(); _currentAbort = null; }
+            document.getElementById('send-btn').disabled=false;
+            document.getElementById('send-btn').style.display='inline-block';
+            document.getElementById('stop-btn').style.display='none';
+            isSending=false;
+            finalizeThinking();
+            showToast('Stopped');
+        }
+
+        // --- Timestamps on Messages ---
+        function addTimestamp(bubble) {
+            const ts = document.createElement('div');
+            ts.style.cssText = 'font-size:.6rem;color:var(--dim);text-align:right;margin-top:4px';
+            ts.textContent = new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+            bubble.appendChild(ts);
+        }
+
+        // --- Copy Entire Response ---
+        function addCopyAllButton(bubble) {
+            if (bubble.classList.contains('user')) return;
+            const btn = document.createElement('button');
+            btn.textContent = 'Copy All';
+            btn.style.cssText = 'position:absolute;top:4px;right:4px;background:var(--card);border:1px solid var(--border);color:var(--dim);padding:2px 8px;border-radius:4px;font-size:.65rem;cursor:pointer;opacity:0.3';
+            btn.onmouseover = () => btn.style.opacity='1';
+            btn.onmouseout = () => btn.style.opacity='0.3';
+            btn.onclick = () => { navigator.clipboard.writeText(bubble.textContent.replace('Copy All','')); btn.textContent='Copied!'; setTimeout(()=>btn.textContent='Copy All',1500); };
+            bubble.style.position='relative';
+            bubble.appendChild(btn);
+        }
+
+        // --- Retry Failed Response ---
+        function addRetryButton(bubble, originalMessage) {
+            const btn = document.createElement('button');
+            btn.textContent = 'Retry';
+            btn.style.cssText = 'background:transparent;border:1px solid var(--red);color:var(--red);padding:4px 12px;border-radius:4px;font-size:.7rem;cursor:pointer;margin-top:6px';
+            btn.onclick = () => { bubble.remove(); document.getElementById('msg').value = originalMessage; send(); };
+            bubble.appendChild(btn);
+        }
+
+        // --- Auto-Scroll Toggle ---
+        let autoScroll = true;
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            showToast(autoScroll ? 'Auto-scroll ON' : 'Auto-scroll OFF');
+        }
+
+        // --- Settings Persistence ---
+        function saveLocalSettings() {
+            const settings = {
+                model: document.getElementById('model-select')?.value || 'auto',
+                streaming: useStreaming,
+                autoScroll: autoScroll,
+            };
+            // Save tool toggles
+            document.querySelectorAll('.toggle-chip[data-tool]').forEach(c => {
+                settings['tool_' + c.dataset.tool] = c.classList.contains('on');
+            });
+            localStorage.setItem('omni-settings', JSON.stringify(settings));
+        }
+        function loadLocalSettings() {
+            try {
+                const s = JSON.parse(localStorage.getItem('omni-settings') || '{}');
+                if (s.model) { const sel = document.getElementById('model-select'); if (sel) sel.value = s.model; }
+                if (s.autoScroll !== undefined) autoScroll = s.autoScroll;
+            } catch(_) {}
+        }
+        // Save settings when toggling tools or changing model
+        const _origToggleTool = window.toggleTool;
+        if (typeof _origToggleTool === 'function') {
+            window.toggleTool = function(el) { _origToggleTool(el); setTimeout(saveLocalSettings, 100); };
         }
 
         // --- Paste Image Inline ---

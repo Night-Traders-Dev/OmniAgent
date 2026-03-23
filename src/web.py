@@ -1849,6 +1849,57 @@ async def api_conversation_tree(session_id: str):
     return JSONResponse(get_conversation_tree(session_id))
 
 
+# --- Server Status Page ---
+
+@app.get("/api/status")
+async def api_server_status():
+    """Comprehensive server status for all subsystems."""
+    from src.config import BITNET_ENABLED, EXPERTS, OLLAMA_NUM_CTX
+    status = {
+        "version": "8.3.0",
+        "server": "running",
+        "ollama": False,
+        "bitnet": BITNET_ENABLED,
+        "gpu_workers": 0,
+        "models": EXPERTS,
+        "context_window": OLLAMA_NUM_CTX,
+        "tools": len(TOOL_REGISTRY) if 'TOOL_REGISTRY' not in dir() else 0,
+        "sessions_active": len(state._sessions),
+        "tasks_completed": state.tasks_completed,
+        "llm_calls": state.total_llm_calls,
+    }
+    # Check Ollama
+    try:
+        import urllib.request
+        with urllib.request.urlopen("http://localhost:11434/api/tags", timeout=2):
+            status["ollama"] = True
+    except Exception:
+        pass
+    # Check GPU workers
+    try:
+        from src.gpu_client import pool
+        status["gpu_workers"] = pool.get_status()["worker_count"]
+    except Exception:
+        pass
+    # Check capabilities
+    try:
+        from src.multimodal import detect_capabilities
+        caps = detect_capabilities()
+        status["stt"] = caps.get("stt", {}).get("available", False)
+        status["tts"] = caps.get("tts", {}).get("available", False)
+        status["vision"] = caps.get("vision", {}).get("available", False)
+        status["image_gen"] = caps.get("image_gen", {}).get("available", False)
+    except Exception:
+        pass
+    # Tools count
+    try:
+        from src.tools import TOOL_REGISTRY
+        status["tools"] = len(TOOL_REGISTRY)
+    except Exception:
+        pass
+    return JSONResponse(status)
+
+
 # --- Reasoning / Thinking History ---
 
 @app.get("/api/reasoning/history")
