@@ -446,6 +446,10 @@
             <!-- OAuth Setup Banner (shown when not configured) -->
             <div id="oauth-setup-banner" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px">
                 <div style="font-size:.8rem;font-weight:600;color:var(--accent);margin-bottom:6px">Setup Required (one-time)</div>
+                <div id="oauth-admin-note" style="display:none;font-size:.72rem;color:var(--dim);line-height:1.5">
+                    OAuth client setup is available to server admins only. Ask an admin to configure GitHub and Google OAuth apps for this server.
+                </div>
+                <div id="oauth-admin-controls">
                 <div style="font-size:.72rem;color:var(--dim);margin-bottom:8px;line-height:1.5">
                     To connect like an app, register OAuth credentials:<br>
                     <b>GitHub:</b> <a href="https://github.com/settings/developers" target="_blank" style="color:var(--accent)">Settings → Developer → New OAuth App</a><br>
@@ -471,6 +475,7 @@
                         </div>
                     </div>
                 </details>
+                </div>
             </div>
             <!-- GitHub -->
             <div style="margin-bottom:12px">
@@ -540,7 +545,7 @@
                 <span style="color:var(--dim);font-size:.75rem">Loading...</span>
             </div>
             <button class="menu-btn" onclick="loadPlugins()">Refresh</button>
-            <button class="menu-btn primary" style="margin-top:4px" onclick="reloadPlugins()">Reload All Plugins</button>
+            <button class="menu-btn primary" id="plugins-reload-btn" style="margin-top:4px" onclick="reloadPlugins()">Reload All Plugins</button>
         </div>
         <div class="menu-section">
             <h4>Account</h4>
@@ -620,6 +625,18 @@
         let sessionId = localStorage.getItem('omni_session_id') || '';
         let authMode = 'login'; // 'login' or 'register'
         let currentUser = localStorage.getItem('omni_username') || '';
+        let isAdmin = localStorage.getItem('omni_is_admin') === '1';
+
+        function applyAdminUi() {
+            const reloadBtn = document.getElementById('plugins-reload-btn');
+            if (reloadBtn) reloadBtn.style.display = isAdmin ? 'block' : 'none';
+            const adminNote = document.getElementById('oauth-admin-note');
+            if (adminNote) adminNote.style.display = isAdmin ? 'none' : 'block';
+            const adminControls = document.getElementById('oauth-admin-controls');
+            if (adminControls) adminControls.style.display = isAdmin ? 'block' : 'none';
+            const userEl = document.getElementById('m-user');
+            if (userEl) userEl.textContent = currentUser ? `${currentUser}${isAdmin ? ' (admin)' : ''}` : '--';
+        }
 
         function toggleAuthMode() {
             authMode = authMode === 'login' ? 'register' : 'login';
@@ -657,8 +674,10 @@
                 if (d.ok) {
                     sessionId = d.session_id;
                     currentUser = d.username;
+                    isAdmin = !!d.is_admin;
                     localStorage.setItem('omni_session_id', sessionId);
                     localStorage.setItem('omni_username', currentUser);
+                    localStorage.setItem('omni_is_admin', isAdmin ? '1' : '0');
                     document.getElementById('login-overlay').classList.add('hidden');
                     initApp();
                 } else {
@@ -674,8 +693,10 @@
         function doLogout() {
             localStorage.removeItem('omni_session_id');
             localStorage.removeItem('omni_username');
+            localStorage.removeItem('omni_is_admin');
             sessionId = '';
             currentUser = '';
+            isAdmin = false;
             location.reload();
         }
 
@@ -687,6 +708,8 @@
                 const d = await r.json();
                 if (d.authenticated) {
                     currentUser = d.username;
+                    isAdmin = !!d.is_admin;
+                    localStorage.setItem('omni_is_admin', isAdmin ? '1' : '0');
                     document.getElementById('login-overlay').classList.add('hidden');
                     initApp();
                     return;
@@ -696,6 +719,7 @@
         }
 
         function initApp() {
+            applyAdminUi();
             startSSE();
             loadSettings();
             refreshModels();
@@ -707,7 +731,7 @@
             fetchVersion();
             // Show username in right panel
             const userEl = document.getElementById('m-user');
-            if (userEl) userEl.textContent = currentUser || 'guest';
+            if (userEl) userEl.textContent = currentUser ? `${currentUser}${isAdmin ? ' (admin)' : ''}` : 'guest';
         }
 
         async function fetchVersion() {
@@ -1546,6 +1570,7 @@
                 const needsSetup = !d.oauth?.github || !d.oauth?.google;
                 document.getElementById('oauth-setup-banner').style.display = needsSetup ? 'block' : 'none';
                 document.getElementById('oauth-callback-url').textContent = window.location.origin + '/api/oauth/callback/{github|google}';
+                applyAdminUi();
             } catch(e) {}
         }
 
@@ -1576,8 +1601,11 @@
             const url = _oauthUrls[service];
             if (!url || url.includes('settings/tokens') || url.includes('oauthplayground')) {
                 // OAuth not configured — prompt setup
-                showToast('Set up OAuth credentials first (see Setup Required above)');
+                showToast(isAdmin
+                    ? 'Set up OAuth credentials first (see Setup Required above)'
+                    : 'Ask a server admin to configure OAuth credentials first');
                 document.getElementById('oauth-setup-banner').style.display = 'block';
+                applyAdminUi();
                 return;
             }
             const w = 600, h = 700;
@@ -1808,8 +1836,17 @@
         // --- Plugins ---
         async function loadPlugins() {
             const list = document.getElementById('plugin-list');
+            if (!isAdmin) {
+                list.innerHTML = '<span style="color:var(--dim);font-size:.75rem">Plugin management is available to server admins only.</span>';
+                return;
+            }
             try {
                 const r = await fetch(`/api/plugins?session_id=${encodeURIComponent(sessionId)}`);
+                if (!r.ok) {
+                    const d = await r.json();
+                    list.innerHTML = `<span style="color:var(--red);font-size:.75rem">${escapeHtml(d.error || 'Failed to load plugins')}</span>`;
+                    return;
+                }
                 const d = await r.json();
                 const plugins = d.plugins || [];
                 if (!plugins.length) { list.innerHTML = '<span style="color:var(--dim);font-size:.75rem">No plugins loaded. Drop .py files in ~/.omniagent/tools/</span>'; return; }
@@ -1823,6 +1860,7 @@
             } catch(e) { list.innerHTML = '<span style="color:var(--red);font-size:.75rem">Failed</span>'; }
         }
         async function reloadPlugins() {
+            if (!isAdmin) { showToast('Plugin management is admin-only'); return; }
             showToast('Reloading plugins...');
             try {
                 const r = await fetch('/api/plugins/reload', {

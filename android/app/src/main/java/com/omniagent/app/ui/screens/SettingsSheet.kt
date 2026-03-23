@@ -155,69 +155,77 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
             // OAuth Setup (one-time)
             if (!state.githubOAuth || !state.googleOAuth) {
                 SettingsSection("OAuth Setup (one-time)") {
-                    Text("Register OAuth apps to enable one-click Connect:", fontSize = 12.sp, color = TextDim)
-                    Spacer(Modifier.height(4.dp))
-                    val context2 = LocalContext.current
-                    // GitHub setup
-                    if (!state.githubOAuth) {
-                        var ghId by remember { mutableStateOf("") }
-                        var ghSecret by remember { mutableStateOf("") }
-                        Text("GitHub", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        SettingsButton("Create GitHub OAuth App", Color.Transparent) {
-                            context2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/developers")))
-                        }
+                    if (!state.isAdmin) {
+                        Text(
+                            "OAuth client setup is available to server admins only. Ask an admin to configure GitHub and Google OAuth apps for this server.",
+                            fontSize = 12.sp,
+                            color = TextDim,
+                        )
+                    } else {
+                        Text("Register OAuth apps to enable one-click Connect:", fontSize = 12.sp, color = TextDim)
                         Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(value = ghId, onValueChange = { ghId = it }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Client ID", color = TextDim, fontSize = 12.sp) }, singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
-                                focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
-                                focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
-                            shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(value = ghSecret, onValueChange = { ghSecret = it }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Client Secret", color = TextDim, fontSize = 12.sp) }, singleLine = true,
-                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
-                                focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
-                                focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
-                            shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
-                        Spacer(Modifier.height(4.dp))
-                        SettingsButton("Save GitHub OAuth", GreenDark) {
-                            if (ghId.isNotBlank() && ghSecret.isNotBlank()) {
-                                vm.saveOAuthConfig("github", ghId.trim(), ghSecret.trim())
-                                ghId = ""; ghSecret = ""
+                        val context2 = LocalContext.current
+                        // GitHub setup
+                        if (!state.githubOAuth) {
+                            var ghId by remember { mutableStateOf("") }
+                            var ghSecret by remember { mutableStateOf("") }
+                            Text("GitHub", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            SettingsButton("Create GitHub OAuth App", Color.Transparent) {
+                                context2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/settings/developers")))
                             }
+                            Spacer(Modifier.height(4.dp))
+                            OutlinedTextField(value = ghId, onValueChange = { ghId = it }, modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Client ID", color = TextDim, fontSize = 12.sp) }, singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
+                                    focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
+                                shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+                            Spacer(Modifier.height(4.dp))
+                            OutlinedTextField(value = ghSecret, onValueChange = { ghSecret = it }, modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Client Secret", color = TextDim, fontSize = 12.sp) }, singleLine = true,
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
+                                    focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
+                                shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+                            Spacer(Modifier.height(4.dp))
+                            SettingsButton("Save GitHub OAuth", GreenDark) {
+                                if (ghId.isNotBlank() && ghSecret.isNotBlank()) {
+                                    vm.saveOAuthConfig("github", ghId.trim(), ghSecret.trim())
+                                    ghId = ""; ghSecret = ""
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
                         }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                    // Google setup
-                    if (!state.googleOAuth) {
-                        var gId by remember { mutableStateOf("") }
-                        var gSecret by remember { mutableStateOf("") }
-                        Text("Google", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        SettingsButton("Create Google OAuth Client", Color.Transparent) {
-                            context2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.cloud.google.com/apis/credentials")))
-                        }
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(value = gId, onValueChange = { gId = it }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Client ID", color = TextDim, fontSize = 12.sp) }, singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
-                                focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
-                                focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
-                            shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
-                        Spacer(Modifier.height(4.dp))
-                        OutlinedTextField(value = gSecret, onValueChange = { gSecret = it }, modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Client Secret", color = TextDim, fontSize = 12.sp) }, singleLine = true,
-                            visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
-                            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
-                                focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
-                                focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
-                            shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
-                        Spacer(Modifier.height(4.dp))
-                        SettingsButton("Save Google OAuth", GreenDark) {
-                            if (gId.isNotBlank() && gSecret.isNotBlank()) {
-                                vm.saveOAuthConfig("google", gId.trim(), gSecret.trim())
-                                gId = ""; gSecret = ""
+                        // Google setup
+                        if (!state.googleOAuth) {
+                            var gId by remember { mutableStateOf("") }
+                            var gSecret by remember { mutableStateOf("") }
+                            Text("Google", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                            SettingsButton("Create Google OAuth Client", Color.Transparent) {
+                                context2.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.cloud.google.com/apis/credentials")))
+                            }
+                            Spacer(Modifier.height(4.dp))
+                            OutlinedTextField(value = gId, onValueChange = { gId = it }, modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Client ID", color = TextDim, fontSize = 12.sp) }, singleLine = true,
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
+                                    focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
+                                shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+                            Spacer(Modifier.height(4.dp))
+                            OutlinedTextField(value = gSecret, onValueChange = { gSecret = it }, modifier = Modifier.fillMaxWidth(),
+                                placeholder = { Text("Client Secret", color = TextDim, fontSize = 12.sp) }, singleLine = true,
+                                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                                colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                                    focusedTextColor = TextPrimary, unfocusedTextColor = TextPrimary, cursorColor = Accent,
+                                    focusedContainerColor = BgDark, unfocusedContainerColor = BgDark),
+                                shape = RoundedCornerShape(6.dp), textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp))
+                            Spacer(Modifier.height(4.dp))
+                            SettingsButton("Save Google OAuth", GreenDark) {
+                                if (gId.isNotBlank() && gSecret.isNotBlank()) {
+                                    vm.saveOAuthConfig("google", gId.trim(), gSecret.trim())
+                                    gId = ""; gSecret = ""
+                                }
                             }
                         }
                     }
@@ -346,21 +354,30 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
 
             // Plugins
             SettingsSection("Plugins") {
-                LaunchedEffect(Unit) { vm.loadPlugins() }
-                if (state.plugins.isEmpty()) {
-                    Text("No plugins loaded. Drop .py files in ~/.omniagent/tools/",
+                if (!state.isAdmin) {
+                    Text("Plugin management is available to server admins only.",
                         fontSize = 12.sp, color = TextDim)
                 } else {
-                    state.plugins.forEach { p ->
-                        Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                            Text(p["name"] ?: "", fontSize = 12.sp, color = TextPrimary,
-                                fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
-                            Text(p["description"]?.take(30) ?: "", fontSize = 11.sp, color = TextDim)
+                    LaunchedEffect(Unit) { vm.loadPlugins() }
+                    state.pluginsError?.let {
+                        Text(it, fontSize = 12.sp, color = RedDark)
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    if (state.plugins.isEmpty() && state.pluginsError == null) {
+                        Text("No plugins loaded. Drop .py files in ~/.omniagent/tools/",
+                            fontSize = 12.sp, color = TextDim)
+                    } else {
+                        state.plugins.forEach { p ->
+                            Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                                Text(p["name"] ?: "", fontSize = 12.sp, color = TextPrimary,
+                                    fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+                                Text(p["description"]?.take(30) ?: "", fontSize = 11.sp, color = TextDim)
+                            }
                         }
                     }
+                    Spacer(Modifier.height(4.dp))
+                    SettingsButton("Reload Plugins", Accent) { vm.reloadPlugins() }
                 }
-                Spacer(Modifier.height(4.dp))
-                SettingsButton("Reload Plugins", Accent) { vm.reloadPlugins() }
             }
 
             // History

@@ -24,6 +24,7 @@ data class ChatUiState(
     val authState: String = "checking", // checking, login, authenticated
     val authUsername: String = "",
     val authError: String? = null,
+    val isAdmin: Boolean = false,
     // Connection
     val connectionState: String = "disconnected",
     val serverIp: String = "",
@@ -73,6 +74,7 @@ data class ChatUiState(
     val memories: List<Map<String, String>> = emptyList(),
     // Plugins
     val plugins: List<Map<String, String>> = emptyList(),
+    val pluginsError: String? = null,
     // Search
     val showSearch: Boolean = false,
     val searchResults: List<Map<String, String>> = emptyList(),
@@ -146,7 +148,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val d = api.checkAuth()
                 if (d.get("authenticated")?.asBoolean == true) {
-                    _state.update { it.copy(authState = "authenticated", authUsername = d.get("username")?.asString ?: "") }
+                    _state.update {
+                        it.copy(
+                            authState = "authenticated",
+                            authUsername = d.get("username")?.asString ?: "",
+                            isAdmin = d.get("is_admin")?.asBoolean ?: false,
+                        )
+                    }
                     startAfterAuth()
                     return@launch
                 }
@@ -165,7 +173,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                             try {
                                 val d2 = api.checkAuth()
                                 if (d2.get("authenticated")?.asBoolean == true) {
-                                    _state.update { it.copy(authState = "authenticated", authUsername = d2.get("username")?.asString ?: "") }
+                                    _state.update {
+                                        it.copy(
+                                            authState = "authenticated",
+                                            authUsername = d2.get("username")?.asString ?: "",
+                                            isAdmin = d2.get("is_admin")?.asBoolean ?: false,
+                                        )
+                                    }
                                     startAfterAuth()
                                     return@launch
                                 }
@@ -231,7 +245,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val d = api.checkAuth()
                 if (d.get("authenticated")?.asBoolean == true) {
-                    _state.update { it.copy(authState = "authenticated", authUsername = d.get("username")?.asString ?: "") }
+                    _state.update {
+                        it.copy(
+                            authState = "authenticated",
+                            authUsername = d.get("username")?.asString ?: "",
+                            isAdmin = d.get("is_admin")?.asBoolean ?: false,
+                        )
+                    }
                     startAfterAuth()
                 } else {
                     _state.update { it.copy(authState = "login") }
@@ -251,7 +271,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val uname = d.get("username")?.asString ?: ""
                     api.sessionId = sid
                     saveAuth(sid, uname, _state.value.serverIp, 8000)
-                    _state.update { it.copy(authState = "authenticated", authUsername = uname, authError = null) }
+                    _state.update {
+                        it.copy(
+                            authState = "authenticated",
+                            authUsername = uname,
+                            authError = null,
+                            isAdmin = d.get("is_admin")?.asBoolean ?: false,
+                        )
+                    }
                     startAfterAuth()
                 } else {
                     _state.update { it.copy(authError = d.get("error")?.asString ?: "Login failed") }
@@ -276,7 +303,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                                     val uname = d2.get("username")?.asString ?: ""
                                     api.sessionId = sid
                                     saveAuth(sid, uname, newUrl, 443)
-                                    _state.update { it.copy(authState = "authenticated", authUsername = uname, authError = null) }
+                                    _state.update {
+                                        it.copy(
+                                            authState = "authenticated",
+                                            authUsername = uname,
+                                            authError = null,
+                                            isAdmin = d2.get("is_admin")?.asBoolean ?: false,
+                                        )
+                                    }
                                     startAfterAuth()
                                     return@launch
                                 }
@@ -302,7 +336,14 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                     val uname = d.get("username")?.asString ?: ""
                     api.sessionId = sid
                     saveAuth(sid, uname, _state.value.serverIp, 8000)
-                    _state.update { it.copy(authState = "authenticated", authUsername = uname, authError = null) }
+                    _state.update {
+                        it.copy(
+                            authState = "authenticated",
+                            authUsername = uname,
+                            authError = null,
+                            isAdmin = d.get("is_admin")?.asBoolean ?: false,
+                        )
+                    }
                     startAfterAuth()
                 } else {
                     _state.update { it.copy(authError = d.get("error")?.asString ?: "Registration failed") }
@@ -314,7 +355,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun doGuestLogin() {
-        _state.update { it.copy(authState = "authenticated", authUsername = "guest") }
+        _state.update { it.copy(authState = "authenticated", authUsername = "guest", isAdmin = false) }
         startAfterAuth()
     }
 
@@ -1047,6 +1088,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     // --- Plugins ---
 
     fun loadPlugins() {
+        if (!_state.value.isAdmin) {
+            _state.update { s: ChatUiState -> s.copy(plugins = emptyList(), pluginsError = "Plugin management is available to server admins only.") }
+            return
+        }
         viewModelScope.launch {
             try {
                 val plugins = api.getPlugins()
@@ -1056,17 +1101,25 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
                         "description" to (p.get("description")?.asString ?: ""),
                     )
                 }
-                _state.update { s: ChatUiState -> s.copy(plugins = list) }
-            } catch (_: Exception) {}
+                _state.update { s: ChatUiState -> s.copy(plugins = list, pluginsError = null) }
+            } catch (e: Exception) {
+                _state.update { s: ChatUiState -> s.copy(plugins = emptyList(), pluginsError = e.message ?: "Failed to load plugins") }
+            }
         }
     }
 
     fun reloadPlugins() {
+        if (!_state.value.isAdmin) {
+            _state.update { s: ChatUiState -> s.copy(pluginsError = "Plugin management is available to server admins only.") }
+            return
+        }
         viewModelScope.launch {
             try {
                 api.reloadPlugins()
                 loadPlugins()
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _state.update { s: ChatUiState -> s.copy(pluginsError = e.message ?: "Failed to reload plugins") }
+            }
         }
     }
 

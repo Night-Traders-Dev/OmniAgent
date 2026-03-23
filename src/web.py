@@ -104,6 +104,11 @@ async def home():
     return HTMLResponse(html, headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"})
 
 
+@app.get("/favicon.ico")
+async def favicon():
+    return PlainTextResponse("", status_code=204)
+
+
 # --- User Accounts ---
 from src.persistence import (
     create_user, authenticate_user, get_user, create_session,
@@ -209,7 +214,13 @@ async def register(request: Request, req: AuthReq):
     if not user:
         return JSONResponse({"error": "Username already taken"}, status_code=400)
     sid = create_session(user["id"])
-    return JSONResponse({"ok": True, "session_id": sid, "user_id": user["id"], "username": user["username"]})
+    return JSONResponse({
+        "ok": True,
+        "session_id": sid,
+        "user_id": user["id"],
+        "username": user["username"],
+        "is_admin": _user_is_admin(user),
+    })
 
 @app.post("/api/auth/invite/generate")
 @limiter.limit("3/minute")
@@ -270,6 +281,7 @@ async def login(request: Request, req: AuthReq):
         "ok": True, "session_id": sid, "user_id": user["id"], "username": user["username"],
         "has_github": bool(user.get("github_token")),
         "has_google": bool(user.get("google_token")),
+        "is_admin": _user_is_admin(user),
     })
 
 @app.get("/api/auth/user")
@@ -294,6 +306,7 @@ async def get_current_user(session_id: str = "default"):
         "username": user["username"],
         "has_github": bool(user.get("github_token")),
         "has_google": bool(user.get("google_token")),
+        "is_admin": _user_is_admin(user),
     })
 
 @app.get("/api/auth/sessions")

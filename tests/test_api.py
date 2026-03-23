@@ -49,6 +49,10 @@ class TestHome:
         r = client.get("/")
         assert r.status_code == 200 and "OmniAgent" in r.text
 
+    def test_favicon(self, client):
+        r = client.get("/favicon.ico")
+        assert r.status_code == 204
+
 class TestMetrics:
     def test_returns(self, client):
         r = client.get("/api/metrics")
@@ -150,6 +154,12 @@ class TestChat:
 
 
 class TestSecurityGuards:
+    def test_auth_user_includes_admin_flag(self, client):
+        _, sid = _create_test_session(admin=True)
+        r = client.get(f"/api/auth/user?session_id={sid}")
+        assert r.status_code == 200
+        assert r.json()["is_admin"] is True
+
     def test_mcp_requires_auth(self, client):
         r = client.post("/mcp", json={
             "jsonrpc": "2.0",
@@ -193,6 +203,8 @@ class TestSecurityGuards:
 
     def test_plugin_endpoints_require_admin(self, client):
         _, sid = _create_test_session(admin=False)
+        list_resp = client.get(f"/api/plugins?session_id={sid}")
+        assert list_resp.status_code == 403
         r = client.post("/api/plugins/reload", json={"session_id": sid})
         assert r.status_code == 403
 
