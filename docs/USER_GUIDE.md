@@ -180,6 +180,43 @@ Click the **☼** button (WebUI header) or **sun/moon** icon (Android top bar) t
 | Double-click message | Edit and resend |
 | Drag & drop files | Upload files |
 
+## MCP (Model Context Protocol)
+
+OmniAgent supports the full MCP protocol — it can both expose its tools and consume tools from other servers.
+
+### Connecting Claude Desktop
+
+Add to `~/.config/claude/claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "omniagent": {
+      "command": "python",
+      "args": ["/path/to/OmniAgent/mcp_server.py"]
+    }
+  }
+}
+```
+
+Claude Desktop will then have access to all 47 OmniAgent tools, 4 resources, and 6 prompts.
+
+### Connecting Claude Code
+
+```bash
+claude mcp add omniagent python /path/to/OmniAgent/mcp_server.py
+```
+
+### Connecting External MCP Servers
+
+In Settings, use the **MCP Servers** section to connect to external MCP servers. External tools become available to all agents automatically.
+
+```bash
+# Example: connect the official filesystem MCP server
+curl -X POST http://localhost:8000/api/mcp/register/stdio \
+  -H "Content-Type: application/json" \
+  -d '{"name": "fs", "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/home"]}'
+```
+
 ## Fine-Tuning
 
 Every time you rate a response (thumbs up/down), training data is collected automatically. After 500+ samples:

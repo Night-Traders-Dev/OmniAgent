@@ -1,4 +1,4 @@
-# OmniAgent v8.4 — Setup & Installation Guide
+# OmniAgent v8.5 — Setup & Installation Guide
 
 ## Prerequisites
 
@@ -195,6 +195,50 @@ OmniAgent automatically creates a Cloudflare tunnel for internet access:
 | `SESSION_TTL_HOURS` | `72` | Session expiry time |
 | `MAX_UPLOAD_DIR_MB` | `500` | Upload directory size limit |
 | `DEV` | — | Set to `1` for hot reload mode |
+
+## MCP Setup
+
+### Claude Desktop
+
+Add to `~/.config/claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "omniagent": {
+      "command": "python",
+      "args": ["/absolute/path/to/OmniAgent/mcp_server.py"],
+      "env": {
+        "PYTHONPATH": "/absolute/path/to/OmniAgent"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop. OmniAgent's 47 tools will appear in the tool list.
+
+### Claude Code
+
+```bash
+claude mcp add omniagent python /absolute/path/to/OmniAgent/mcp_server.py
+```
+
+### HTTP MCP Clients
+
+While the OmniAgent server is running, POST JSON-RPC 2.0 messages to `http://localhost:8000/mcp`:
+
+```bash
+# List tools
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+
+# Call a tool
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"python_eval","arguments":{"expression":"2**10"}}}'
+```
 
 ## Troubleshooting
 

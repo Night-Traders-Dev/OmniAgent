@@ -11,7 +11,7 @@
                          │ HTTP/SSE/WebSocket
 ┌────────────────────────┴─────────────────────────────────┐
 │                  FastAPI Server                           │
-│  src/web.py — 147 endpoints, rate limiting, CORS, auth   │
+│  src/web.py — 155 endpoints, rate limiting, CORS, auth   │
 └──┬─────┬──────┬──────┬──────┬──────┬─────────────────────┘
    │     │      │      │      │      │
 ┌──┴──┐ ┌┴───┐ ┌┴───┐ ┌┴────┐┌┴───┐ ┌┴──────────────────┐
@@ -44,8 +44,8 @@
 
 | Module | Lines | Responsibility |
 |--------|-------|----------------|
-| `web.py` | 2200+ | FastAPI server, all endpoints, middleware |
-| `tools.py` | 1400+ | 47 tool implementations, registry, execution |
+| `web.py` | 2400+ | FastAPI server, 155 endpoints, middleware |
+| `tools.py` | 1600+ | 47 tool implementations, registry, execution, MCP routing |
 | `config.py` | 40 | Model config, Ollama/BitNet clients |
 | `state.py` | 340 | Session state, global state, metrics tracking |
 | `persistence.py` | 540 | SQLite, Fernet encryption, user/session CRUD |
@@ -68,7 +68,8 @@
 | `task_engine.py` | 350+ | Multi-phase tasks, checkpoints, queue, git rollback |
 | `upgrades.py` | 300+ | Request queue, cache, health checks, quality scoring |
 | `experiments.py` | 250+ | A/B testing, fine-tuning data, metrics dashboard |
-| `platform.py` | 280+ | Sandbox, WebSocket, MCP server, notifications |
+| `platform.py` | 280+ | Sandbox, WebSocket, legacy MCP, notifications |
+| `mcp.py` | 550+ | Full MCP protocol: server (stdio/SSE), client, typed schemas, resources, prompts |
 
 ### Multimodal
 
@@ -186,6 +187,51 @@ User types message
 └────────────────────────────────────────┘
 ```
 
+## MCP Protocol Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 OMNIAGENT AS MCP SERVER                  │
+│                                                          │
+│  Stdio Transport (mcp_server.py)                        │
+│    Claude Desktop ─── stdin/stdout ──→ MCPProtocolHandler│
+│    Claude Code    ─── stdin/stdout ──→ MCPProtocolHandler│
+│                                                          │
+│  HTTP Transport (POST /mcp)                             │
+│    Web MCP clients ── JSON-RPC ──→ MCPProtocolHandler   │
+│    SSE stream (GET /mcp/sse) for server-push events     │
+│                                                          │
+│  Exposes:                                                │
+│    46 tools (typed JSON Schema)                         │
+│    4 resources (config, metrics, agents, tools)         │
+│    6 prompts (code review, debug, refactor, etc.)       │
+│    Auto-completion for names/URIs                       │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│                 OMNIAGENT AS MCP CLIENT                  │
+│                                                          │
+│  MCPClient ──→ Stdio: launch subprocess, JSON-RPC       │
+│            ──→ SSE: POST to remote HTTP endpoint        │
+│                                                          │
+│  Auto-discovers: tools, resources, prompts              │
+│  External tools registered as server__toolname          │
+│  Agents call execute_tool("server__tool", args)         │
+│  Routed through existing tool framework seamlessly      │
+└─────────────────────────────────────────────────────────┘
+
+JSON-RPC 2.0 Methods:
+  initialize          → Exchange capabilities
+  tools/list          → 46 tools with typed inputSchema
+  tools/call          → Execute any tool, return content[]
+  resources/list      → 4 omniagent:// resources
+  resources/read      → Get resource content as JSON
+  prompts/list        → 6 reusable prompt templates
+  prompts/get         → Expand prompt with arguments
+  completion/complete → Auto-complete tool/resource/prompt names
+  ping                → Health check
+```
+
 ## Database Schema
 
 ```sql
@@ -244,6 +290,21 @@ def my_tool(arg1: str, arg2: int = 0) -> str:
 4. If toggleable, add to `_tool_toggle_map` in `base.py`:
 ```python
 "my_tool": "shell",  # or "file_read", "web_search", etc.
+```
+
+5\. Add a typed MCP schema in `TOOL_SCHEMAS` in `src/mcp.py`:
+```python
+"my_tool": {
+    "description": "What it does",
+    "inputSchema": {
+        "type": "object",
+        "properties": {
+            "arg1": {"type": "string", "description": "First argument"},
+            "arg2": {"type": "integer", "description": "Optional count", "default": 0},
+        },
+        "required": ["arg1"],
+    },
+},
 ```
 
 ## Adding a New Agent

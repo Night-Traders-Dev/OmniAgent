@@ -1,6 +1,6 @@
 # API Reference
 
-**147 endpoints** — Interactive docs at `http://localhost:8000/docs`
+**155 endpoints** — Interactive docs at `http://localhost:8000/docs`
 
 
 ## /
@@ -98,7 +98,7 @@
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/mcp/execute` |  |
+| `POST` | `/mcp/execute` | Legacy: execute a tool via MCP (prefer POST /mcp with tools/call) |
 
 ## /export
 
@@ -175,14 +175,21 @@
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/mcp/manifest` |  |
+| `GET` | `/mcp/manifest` | Legacy: get tool manifest (prefer POST /mcp with tools/list) |
 
 ## /mcp
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/mcp/register` |  |
-| `GET` | `/api/mcp/servers` |  |
+| `POST` | `/mcp` | MCP JSON-RPC 2.0 endpoint (initialize, tools/list, tools/call, resources, prompts, completion) |
+| `GET` | `/mcp/sse` | MCP SSE transport — server pushes events, client POSTs to /mcp |
+| `POST` | `/api/mcp/register` | Legacy: register external MCP server by URL |
+| `POST` | `/api/mcp/register/stdio` | Connect to external MCP server via stdio (launches subprocess) |
+| `POST` | `/api/mcp/register/sse` | Connect to external MCP server via SSE/HTTP transport |
+| `POST` | `/api/mcp/call` | Call a tool on a connected external MCP server |
+| `POST` | `/api/mcp/disconnect` | Disconnect from an external MCP server |
+| `GET` | `/api/mcp/servers` | List all connected external MCP servers and their tools |
+| `GET` | `/api/mcp/tools` | List all tools from all connected external MCP servers |
 
 ## /memory
 

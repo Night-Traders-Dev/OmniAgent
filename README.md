@@ -8,8 +8,9 @@
 |----------|--------|----------|
 | **WebUI** | Production | `http://localhost:8000` |
 | **Android** | Production | `android/app/build/outputs/apk/debug/app-debug.apk` |
-| **Linux Desktop** | Production | `desktop/src-tauri/target/release/bundle/deb/OmniAgent_8.4.0_amd64.deb` |
+| **Linux Desktop** | Production | `desktop/src-tauri/target/release/bundle/deb/` |
 | **GPU Worker** | Optional | `gpu_worker.py` (second PC) |
+| **MCP Server** | Production | `mcp_server.py` (stdio for Claude Desktop/Code) |
 
 ## Quick Start
 
@@ -54,7 +55,7 @@ DEV=1 python omni_agent.py
 └────────────────────┬────────────────────────────────┘
                      │ REST/SSE/WebSocket
 ┌────────────────────┴────────────────────────────────┐
-│              FastAPI Server (147 endpoints)          │
+│              FastAPI Server (155 endpoints)           │
 │  Auth │ Chat │ Tools │ Tasks │ OAuth │ Scheduler     │
 └──┬──────┬──────┬──────┬──────┬──────────────────────┘
    │      │      │      │      │
@@ -99,6 +100,15 @@ DEV=1 python omni_agent.py
 - **On-device NPU** — Galaxy S24 Ultra Snapdragon 8 Gen 3 Hexagon NPU for local inference
 - **Gemini Nano** — On-device LLM via Google AI Core for query rewriting, intent classification, sentiment, summarization, and smart replies — all without server round-trip
 
+### MCP (Model Context Protocol)
+
+- **MCP Server** — Expose all 47 tools to Claude Desktop, Claude Code, or any MCP client via stdio or HTTP
+- **MCP Client** — Connect to external MCP servers (stdio subprocess or SSE/HTTP) and auto-import their tools
+- **46 typed schemas** — Proper JSON Schema with integer/boolean/array types, required fields, defaults
+- **Resources** — 4 queryable resources (config, metrics, agents, tools)
+- **Prompts** — 6 reusable prompts (code review, debug, refactor, etc.)
+- **Auto-completion** — Tool names, resource URIs, prompt names
+
 ### Voice
 - **STT** — faster-whisper for speech-to-text
 - **TTS** — piper with Amy voice model, smart text preprocessor (100+ abbreviations, symbols, code syntax)
@@ -113,7 +123,7 @@ DEV=1 python omni_agent.py
 - **bcrypt passwords** with auto-upgrade from legacy hashes
 - **Fernet encryption** (AES-128-CBC + HMAC-SHA256) for all chat messages and tokens
 - **CORS restricted** to localhost + Cloudflare tunnels
-- **Rate limiting** — 60/min default on all 147 endpoints
+- **Rate limiting** — 60/min default on all 155 endpoints
 - **Login lockout** — 10 failed attempts = 5 min lockout
 - **Audit log** — All shell commands, file writes, logins logged
 - **Sandboxed execution** — Run untrusted code in Docker containers
@@ -199,7 +209,7 @@ OmniAgent/
 ├── omni_agent.py          # Entry point — starts all services
 ├── gpu_worker.py          # Standalone GPU worker for second PC
 ├── src/
-│   ├── web.py             # FastAPI server (147 endpoints)
+│   ├── web.py             # FastAPI server (155 endpoints)
 │   ├── tools.py           # 47 tool implementations
 │   ├── config.py          # Model configuration
 │   ├── state.py           # Session state management
@@ -230,7 +240,7 @@ OmniAgent/
 ├── android/               # Android app (Kotlin + Jetpack Compose)
 ├── desktop/               # Linux desktop app (Tauri + Rust)
 ├── vscode-extension/      # VS Code extension scaffold
-├── tests/                 # Unit tests (256+ tests)
+├── tests/                 # 396 tests (all passing)
 ├── docker-compose.yml     # One-command deployment
 ├── Dockerfile             # Container image
 ├── omniagent.service      # systemd auto-start
