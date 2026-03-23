@@ -20,6 +20,7 @@
 #include <curl/curl.h>
 #include "keyboard.h"
 #include "login.h"
+#include "background.h"
 
 /* ═══ Configuration ═══ */
 #define WINDOW_W 1024
@@ -34,23 +35,23 @@
 #define POLL_INTERVAL_MS 5000
 #define WEATHER_INTERVAL_MS 300000 /* 5 min */
 
-/* ═══ Colors ═══ */
+/* ═══ Colors (warm, homey palette with transparency for animated bg) ═══ */
 typedef struct { Uint8 r, g, b, a; } Color;
 
-static const Color COL_BG       = {10, 14, 20, 255};
-static const Color COL_SURFACE  = {17, 24, 32, 255};
-static const Color COL_CARD     = {22, 29, 39, 255};
-static const Color COL_BORDER   = {30, 42, 56, 255};
-static const Color COL_ACCENT   = {74, 158, 255, 255};
-static const Color COL_TEXT     = {224, 232, 240, 255};
-static const Color COL_DIM      = {106, 122, 138, 255};
-static const Color COL_GREEN    = {63, 185, 80, 255};
-static const Color COL_RED      = {255, 74, 74, 255};
-static const Color COL_YELLOW   = {232, 171, 74, 255};
+static const Color COL_BG       = {8, 10, 18, 255};
+static const Color COL_SURFACE  = {14, 18, 28, 200};   /* Semi-transparent — bg shows through */
+static const Color COL_CARD     = {18, 24, 36, 180};
+static const Color COL_BORDER   = {40, 50, 70, 120};
+static const Color COL_ACCENT   = {100, 160, 240, 255};
+static const Color COL_TEXT     = {230, 235, 245, 255};
+static const Color COL_DIM      = {120, 135, 155, 255};
+static const Color COL_GREEN    = {80, 200, 120, 255};
+static const Color COL_RED      = {240, 90, 90, 255};
+static const Color COL_YELLOW   = {240, 190, 100, 255};
 static const Color COL_WHITE    = {255, 255, 255, 255};
-static const Color COL_USER_BG  = {74, 158, 255, 255};
-static const Color COL_ASST_BG  = {22, 29, 39, 255};
-static const Color COL_WEATHER  = {26, 42, 74, 255};
+static const Color COL_USER_BG  = {90, 130, 200, 220};  /* Softer blue, semi-transparent */
+static const Color COL_ASST_BG  = {20, 26, 40, 190};    /* Glass-like */
+static const Color COL_WEATHER  = {20, 35, 65, 200};
 
 /* ═══ Structs ═══ */
 typedef struct {
@@ -114,9 +115,10 @@ static bool running = true;
 static int screen_w = WINDOW_W;
 static int screen_h = WINDOW_H;
 
-/* Touch keyboard + Login */
+/* Touch keyboard + Login + Animated background */
 static Keyboard vkb;
 static LoginState login_state;
+static AnimatedBG anim_bg;
 
 /* Forward declarations */
 static void save_server_url(void);
@@ -216,6 +218,7 @@ static bool json_get_bool(const char *json, const char *key) {
 static void set_color(Color c) { SDL_SetRenderDrawColor(renderer, c.r, c.g, c.b, c.a); }
 
 static void fill_rect(int x, int y, int w, int h, Color c) {
+    SDL_SetRenderDrawBlendMode(renderer, c.a < 255 ? SDL_BLENDMODE_BLEND : SDL_BLENDMODE_NONE);
     set_color(c);
     SDL_Rect r = {x, y, w, h};
     SDL_RenderFillRect(renderer, &r);
@@ -589,7 +592,8 @@ static void draw_chat(void) {
     int cw = screen_w - SIDEBAR_W;
     int ch = screen_h - TOPBAR_H - INPUT_H;
 
-    fill_rect(cx, cy, cw, ch, COL_BG);
+    /* Chat area — transparent, animated bg shows through */
+    fill_rect(cx, cy, cw, ch, (Color){8, 10, 18, 100});
 
     /* Messages */
     int y = cy + 8 - scroll_offset;
@@ -943,9 +947,10 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    /* Initialize keyboard and login */
+    /* Initialize subsystems */
     kb_init(&vkb);
     login_init(&login_state);
+    bg_init(&anim_bg);
 
     /* Initial fetch if URL provided */
     if (server_url[0]) {
@@ -1109,9 +1114,17 @@ int main(int argc, char *argv[]) {
             }
         }
 
+        /* Update animated background */
+        float dt = 1.0f / FPS;
+        bg_update(&anim_bg, dt);
+
         /* Render */
-        set_color(COL_BG);
+        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);
+
+        /* Animated background — always drawn first, all screens get it */
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        bg_render(&anim_bg, renderer, screen_w, screen_h);
 
         if (show_connect_dialog) {
             draw_connect_dialog();

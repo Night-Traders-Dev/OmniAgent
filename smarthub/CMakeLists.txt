@@ -13,7 +13,11 @@ add_executable(omni-hub
     src/main.c
     src/keyboard.c
     src/login.c
+    src/background.c
 )
+
+# Link math library for sin/cos/sqrt
+target_link_libraries(omni-hub PRIVATE m)
 
 target_include_directories(omni-hub PRIVATE
     ${SDL2_INCLUDE_DIRS}
