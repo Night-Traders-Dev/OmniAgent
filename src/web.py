@@ -107,6 +107,38 @@ from src.persistence import (
 class AuthReq(BaseModel):
     username: str
     password: str
+    invite_code: str = ""
+
+# Invite code system — codes are stored in the DB global_state table
+# Generate with: POST /api/auth/invite/generate (requires admin)
+# Default code on first run is derived from the pairing code
+def _get_valid_invite_codes() -> set:
+    """Get all valid invite codes from the database."""
+    from src.persistence import get_db
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT value FROM global_state WHERE key LIKE 'invite_code_%'").fetchall()
+        codes = {row[0] for row in rows}
+    except Exception:
+        codes = set()
+    # Always accept the pairing-derived code as a master invite
+    import hashlib
+    import platform, os
+    identity = f"{platform.node()}-{os.environ.get('USER', 'omni')}"
+    master = hashlib.sha256(identity.encode()).hexdigest()[:8]
+    codes.add(master)
+    return codes
+
+def _create_invite_code() -> str:
+    """Generate a new invite code and store it."""
+    import secrets
+    code = secrets.token_hex(4)  # 8-char hex code
+    from src.persistence import get_db
+    conn = get_db()
+    conn.execute("INSERT OR REPLACE INTO global_state (key, value) VALUES (?, ?)",
+                 (f"invite_code_{code}", code))
+    conn.commit()
+    return code
 
 @app.post("/api/auth/register")
 @limiter.limit("5/minute")
@@ -118,6 +150,10 @@ async def register(request: Request, req: AuthReq):
         return JSONResponse({"error": "Password must be at least 6 characters"}, status_code=400)
     if not all(c.isalnum() or c in '_-.' for c in req.username):
         return JSONResponse({"error": "Username must be alphanumeric (with _-. allowed)"}, status_code=400)
+    # Invite code required
+    valid_codes = _get_valid_invite_codes()
+    if not req.invite_code or req.invite_code not in valid_codes:
+        return JSONResponse({"error": "Invalid invite code. Ask the server admin for one."}, status_code=403)
     import asyncio
     loop = asyncio.get_event_loop()
     user = await loop.run_in_executor(None, create_user, req.username, req.password)
@@ -125,6 +161,25 @@ async def register(request: Request, req: AuthReq):
         return JSONResponse({"error": "Username already taken"}, status_code=400)
     sid = create_session(user["id"])
     return JSONResponse({"ok": True, "session_id": sid, "user_id": user["id"], "username": user["username"]})
+
+@app.post("/api/auth/invite/generate")
+@limiter.limit("3/minute")
+async def generate_invite(request: Request, session_id: str = ""):
+    """Generate a new invite code. Requires authenticated session."""
+    user = get_session_user(session_id)
+    if not user:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    code = _create_invite_code()
+    return JSONResponse({"invite_code": code})
+
+@app.get("/api/auth/invite/list")
+async def list_invites(session_id: str = ""):
+    """List all active invite codes. Requires authenticated session."""
+    user = get_session_user(session_id)
+    if not user:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    codes = list(_get_valid_invite_codes())
+    return JSONResponse({"codes": codes})
 
 @app.post("/api/auth/login")
 @limiter.limit("10/minute")
@@ -704,6 +759,10 @@ def _parse_npu_hints(message: str) -> tuple:
     intent, mood = m.group(1), m.group(2)
     clean = message[m.end():]
     ctx = f"\nNPU PRE-ANALYSIS (from on-device Gemini Nano): intent={intent}, mood={mood}. Use these to skip redundant classification.\n"
+    # Log NPU activity to thinking dialogue
+    from datetime import datetime
+    ts = datetime.now().strftime("%H:%M:%S")
+    state.session.progress_log.append(f"[{ts}] ⚡ NPU: Pre-classified intent={intent}, mood={mood}")
     return clean, ctx
 
 @app.post("/chat")

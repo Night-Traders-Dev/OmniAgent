@@ -318,8 +318,8 @@ class OmniAgentApi(var baseUrl: String = "") {
         safeParseJson(response.body?.string())
     }
 
-    suspend fun register(username: String, password: String): JsonObject = withContext(Dispatchers.IO) {
-        val body = """{"username":${gson.toJson(username)},"password":${gson.toJson(password)}}""".toRequestBody(json)
+    suspend fun register(username: String, password: String, inviteCode: String = ""): JsonObject = withContext(Dispatchers.IO) {
+        val body = """{"username":${gson.toJson(username)},"password":${gson.toJson(password)},"invite_code":${gson.toJson(inviteCode)}}""".toRequestBody(json)
         val request = Request.Builder().url("$baseUrl/api/auth/register").post(body).build()
         val response = client.newCall(request).execute()
         safeParseJson(response.body?.string())

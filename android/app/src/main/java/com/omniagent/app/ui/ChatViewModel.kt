@@ -293,10 +293,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun doRegister(username: String, password: String) {
+    fun doRegister(username: String, password: String, inviteCode: String = "") {
         viewModelScope.launch {
             try {
-                val d = api.register(username, password)
+                val d = api.register(username, password, inviteCode)
                 if (d.get("ok")?.asBoolean == true) {
                     val sid = d.get("session_id")?.asString ?: api.sessionId
                     val uname = d.get("username")?.asString ?: ""

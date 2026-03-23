@@ -90,26 +90,35 @@ fun LoginScreen(state: ChatUiState, vm: ChatViewModel) {
             }
             Spacer(Modifier.height(8.dp))
 
+            // Invite code (only for registration)
+            var inviteCode by remember { mutableStateOf("") }
+            if (isRegister) {
+                OutlinedTextField(
+                    value = inviteCode, onValueChange = { inviteCode = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Invite Code", color = TextDim) },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Accent, unfocusedBorderColor = BorderDark,
+                        cursorColor = Accent, focusedTextColor = Color.White, unfocusedTextColor = Color.White,
+                        focusedContainerColor = CardDark, unfocusedContainerColor = CardDark,
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
             Button(
                 onClick = {
                     if (username.isNotBlank() && password.isNotBlank()) {
                         vm.setRememberDevice(rememberDevice)
-                        if (isRegister) vm.doRegister(username, password) else vm.doLogin(username, password)
+                        if (isRegister) vm.doRegister(username, password, inviteCode) else vm.doLogin(username, password)
                     }
                 },
                 modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Accent),
             ) {
                 Text(if (isRegister) "Create Account" else "Sign In", fontWeight = FontWeight.Bold)
-            }
-            Spacer(Modifier.height(8.dp))
-
-            OutlinedButton(
-                onClick = { vm.doGuestLogin() },
-                modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, BorderDark),
-            ) {
-                Text("Continue as Guest", color = TextDim)
             }
             Spacer(Modifier.height(16.dp))
 

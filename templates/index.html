@@ -319,11 +319,11 @@
             <div id="auth-error" class="login-error"></div>
             <input type="text" id="auth-user" placeholder="Username" autocomplete="username">
             <input type="password" id="auth-pass" placeholder="Password" autocomplete="current-password" onkeypress="if(event.key==='Enter')doAuth()">
+            <input type="text" id="auth-invite" placeholder="Invite Code (required for registration)" autocomplete="off" style="display:none">
             <label style="display:flex;align-items:center;gap:6px;margin:8px 0;font-size:.8rem;color:var(--dim);cursor:pointer">
                 <input type="checkbox" id="auth-remember" checked style="accent-color:var(--accent)"> Remember this device
             </label>
             <button class="login-btn login-primary" onclick="doAuth()" id="auth-btn">Sign In</button>
-            <button class="login-btn login-secondary" onclick="doGuest()">Continue as Guest</button>
             <div class="login-toggle" onclick="toggleAuthMode()" id="auth-toggle">Don't have an account? Register</div>
         </div>
     </div>
@@ -627,6 +627,7 @@
             document.getElementById('auth-btn').textContent = authMode === 'login' ? 'Sign In' : 'Create Account';
             document.getElementById('auth-toggle').textContent = authMode === 'login'
                 ? "Don't have an account? Register" : "Already have an account? Sign In";
+            document.getElementById('auth-invite').style.display = authMode === 'register' ? 'block' : 'none';
             document.getElementById('auth-error').style.display = 'none';
         }
 
@@ -636,12 +637,21 @@
             if (!user || !pass) return;
             const errEl = document.getElementById('auth-error');
             errEl.style.display = 'none';
+            const body = {username: user, password: pass};
+            if (authMode === 'register') {
+                body.invite_code = document.getElementById('auth-invite').value.trim();
+                if (!body.invite_code) {
+                    errEl.textContent = 'Invite code is required to register';
+                    errEl.style.display = 'block';
+                    return;
+                }
+            }
             try {
                 const endpoint = authMode === 'login' ? '/api/auth/login' : '/api/auth/register';
                 const r = await fetch(endpoint, {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({username: user, password: pass}),
+                    body: JSON.stringify(body),
                 });
                 const d = await r.json();
                 if (d.ok) {
@@ -659,15 +669,6 @@
                 errEl.textContent = 'Connection error: ' + e.message;
                 errEl.style.display = 'block';
             }
-        }
-
-        function doGuest() {
-            sessionId = crypto.randomUUID().substring(0, 8);
-            currentUser = 'guest';
-            localStorage.setItem('omni_session_id', sessionId);
-            localStorage.setItem('omni_username', 'guest');
-            document.getElementById('login-overlay').classList.add('hidden');
-            initApp();
         }
 
         function doLogout() {
@@ -691,11 +692,7 @@
                     return;
                 }
             } catch(e) {}
-            // If guest session exists, allow through
-            if (currentUser === 'guest') {
-                document.getElementById('login-overlay').classList.add('hidden');
-                initApp();
-            }
+            // No guest mode — must sign in
         }
 
         function initApp() {

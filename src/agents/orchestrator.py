@@ -189,7 +189,7 @@ class Orchestrator:
                 "greeting": "fast",
             }
             if npu_intent in npu_map:
-                self._log(f"Orchestrator: NPU fast-route → {npu_map[npu_intent]} (intent={npu_intent})")
+                self._log(f"⚡ NPU: Fast-route → {npu_map[npu_intent]} (intent={npu_intent})")
                 return npu_map[npu_intent]
 
         lower = user_input.lower().strip()
