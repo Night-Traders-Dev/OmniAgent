@@ -222,6 +222,10 @@ class TestAgentToolAwareness:
         prompt = ToolAgent.system_prompt
         assert "QUICK ACTIONS" in prompt
 
+    def test_tool_user_mentions_diff_preview(self):
+        from src.agents.specialists import ToolAgent
+        assert "diff_preview" in ToolAgent.system_prompt
+
     def test_reasoner_knows_read_tools(self):
         from src.agents.specialists import ReasoningAgent
         prompt = ReasoningAgent.system_prompt
@@ -235,6 +239,36 @@ class TestAgentToolAwareness:
     def test_fast_no_tool_steps(self):
         from src.agents.specialists import FastAgent
         assert FastAgent.max_tool_steps == 0
+
+
+class TestAgentToolAccess:
+    def test_specialists_define_explicit_allowed_tools(self):
+        from src.agents.specialists import ReasoningAgent, CodingAgent, ResearchAgent, PlannerAgent
+        for cls in [ReasoningAgent, CodingAgent, ResearchAgent, PlannerAgent]:
+            assert cls.allowed_tools is not None
+            assert "done" in cls.allowed_tools
+
+    def test_reasoner_is_limited_to_analysis_tools(self):
+        from src.agents.specialists import ReasoningAgent
+        agent = ReasoningAgent()
+        assert agent._is_tool_allowed("read")
+        assert agent._is_tool_allowed("project_deps")
+        assert not agent._is_tool_allowed("shell")
+        assert not agent._is_tool_allowed("write")
+
+    def test_reasoner_reference_does_not_leak_write_tools(self):
+        from src.agents.specialists import ReasoningAgent
+        ref = ReasoningAgent()._tool_reference()
+        assert "shell" not in ref
+        assert "write" not in ref
+        assert "project_deps" in ref
+
+    def test_tool_user_gets_full_registered_toolset(self):
+        from src.agents.specialists import ToolAgent
+        agent = ToolAgent()
+        assert agent._is_tool_allowed("shell")
+        assert agent._is_tool_allowed("database")
+        assert agent._is_tool_allowed("diff_preview")
 
 
 class TestDispatchPromptAwareness:
@@ -251,6 +285,11 @@ class TestDispatchPromptAwareness:
         assert "edit" in DISPATCH_PROMPT and "write" in DISPATCH_PROMPT
         # Researcher should list its tools
         assert "deep_research" in DISPATCH_PROMPT and "weather" in DISPATCH_PROMPT
+
+    def test_dispatch_lists_full_tool_user_surface(self):
+        from src.agents.orchestrator import DISPATCH_PROMPT
+        for tool in ["diff_preview", "database", "pdf_read", "network_info", "sandbox_run"]:
+            assert tool in DISPATCH_PROMPT
 
     def test_dispatch_has_routing_rules(self):
         from src.agents.orchestrator import DISPATCH_PROMPT

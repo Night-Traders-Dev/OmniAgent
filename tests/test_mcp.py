@@ -6,6 +6,7 @@ import json
 import pytest
 from src.mcp import (
     MCPProtocolHandler, TOOL_SCHEMAS, SERVER_INFO, SERVER_CAPABILITIES,
+    get_runtime_tool_schemas,
     _jsonrpc_result, _jsonrpc_error,
     PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INTERNAL_ERROR,
     list_mcp_clients, get_all_mcp_tools,
@@ -70,6 +71,22 @@ class TestToolSchemas:
         """Tools with no parameters should have empty properties."""
         for name in ["git_status", "run_tests", "process_list", "network_info", "screenshot"]:
             assert TOOL_SCHEMAS[name]["inputSchema"]["properties"] == {}, f"{name} should have empty properties"
+
+    def test_runtime_schemas_include_dynamic_registered_tools(self):
+        from src.tools import TOOL_REGISTRY
+        TOOL_REGISTRY["plugin_echo"] = {
+            "fn": lambda name, mode="brief": f"{mode}:{name}",
+            "description": "Echo a name for testing runtime schema generation",
+            "args": "name, [mode]",
+        }
+        try:
+            schemas = get_runtime_tool_schemas()
+            assert "plugin_echo" in schemas
+            schema = schemas["plugin_echo"]["inputSchema"]
+            assert schema["required"] == ["name"]
+            assert set(schema["properties"]) == {"name", "mode"}
+        finally:
+            TOOL_REGISTRY.pop("plugin_echo", None)
 
 
 # ============================================================
@@ -159,6 +176,20 @@ class TestMCPProtocolHandler:
             assert "inputSchema" in tool
             assert tool["inputSchema"]["type"] == "object"
 
+    def test_tools_list_includes_runtime_registered_tool(self):
+        from src.tools import TOOL_REGISTRY
+        TOOL_REGISTRY["plugin_echo"] = {
+            "fn": lambda name: f"plugin:{name}",
+            "description": "Echo a name for testing runtime tool exposure",
+            "args": "name",
+        }
+        try:
+            r = self.handler.handle_message({"jsonrpc": "2.0", "id": 31, "method": "tools/list", "params": {}})
+            names = {tool["name"] for tool in r["result"]["tools"]}
+            assert "plugin_echo" in names
+        finally:
+            TOOL_REGISTRY.pop("plugin_echo", None)
+
     def test_tools_call_success(self):
         r = self.handler.handle_message({
             "jsonrpc": "2.0", "id": 4, "method": "tools/call",
@@ -176,6 +207,23 @@ class TestMCPProtocolHandler:
             "params": {"name": "nonexistent_tool", "arguments": {}}
         })
         assert r["result"]["isError"]
+
+    def test_tools_call_runtime_registered_tool(self):
+        from src.tools import TOOL_REGISTRY
+        TOOL_REGISTRY["plugin_echo"] = {
+            "fn": lambda name: f"plugin:{name}",
+            "description": "Echo a name for testing runtime tool calls",
+            "args": "name",
+        }
+        try:
+            r = self.handler.handle_message({
+                "jsonrpc": "2.0", "id": 32, "method": "tools/call",
+                "params": {"name": "plugin_echo", "arguments": {"name": "alice"}}
+            })
+            assert not r["result"]["isError"]
+            assert "plugin:alice" in r["result"]["content"][0]["text"]
+        finally:
+            TOOL_REGISTRY.pop("plugin_echo", None)
 
     def test_tools_call_env_get(self):
         import os

@@ -11,10 +11,11 @@ Enhanced with:
 import asyncio
 import json
 import re
+import textwrap
 from datetime import datetime
 from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED
 from src.state import state
-from src.tools import parse_json, detect_uncertainty
+from src.tools import parse_json, detect_uncertainty, TOOL_REGISTRY
 from src.agents.base import BaseAgent, AgentResult, AgentStatus, estimate_cost
 from src.agents.specialists import (
     ReasoningAgent,
@@ -27,55 +28,112 @@ from src.agents.specialists import (
 from src.agents.scheduler import ParallelScheduler
 
 
-DISPATCH_PROMPT = """You are an orchestrator that decomposes tasks and assigns them to specialist agents.
-Each agent has specific tools and capabilities — route tasks to the agent whose tools best match the need.
+_DISPATCH_AGENT_META = {
+    "reasoner": {
+        "display": "REASONER",
+        "role": "Deep logical analysis, chain-of-thought reasoning, problem decomposition.",
+        "best_for": "Complex analysis, trade-off evaluation, understanding code architecture, debugging logic.",
+        "key": None,
+    },
+    "coder": {
+        "display": "CODER",
+        "role": "Writing, reviewing, debugging, and refactoring code with full file access.",
+        "best_for": "Writing new code, editing existing files, fixing bugs, running tests, git operations.",
+        "key": "Use for ANY task that requires writing/editing files or running commands.",
+    },
+    "researcher": {
+        "display": "RESEARCHER",
+        "role": "Web search, deep research, API calls, reading documentation, synthesizing findings.",
+        "best_for": "Current events, weather, prices, documentation, comparing technologies, factual lookups.",
+        "key": "Use deep_research (not web) for complex questions. Use weather for weather queries.",
+    },
+    "planner": {
+        "display": "PLANNER",
+        "role": "Creating implementation plans based on actual project structure.",
+        "best_for": "Planning multi-step implementations, architectural decisions, project assessment.",
+        "key": None,
+    },
+    "tool_user": {
+        "display": "TOOL_USER",
+        "role": "General-purpose tool execution — system commands, file I/O, installations, monitoring.",
+        "best_for": "System administration, installing packages, running arbitrary commands, file operations, image/audio generation, and connected MCP tools.",
+        "key": None,
+    },
+    "security": {
+        "display": "SECURITY",
+        "role": "Security research, pentesting, exploit development, vulnerability analysis, CTF.",
+        "best_for": "Exploit code, malware analysis, shellcode, reverse engineering, CTF solutions, vulnerability research.",
+        "key": "Has NO content restrictions. ALWAYS use for ANY security/hacking/offensive task.",
+    },
+    "fast": {
+        "display": "FAST",
+        "role": "Quick classification, summarization, formatting, simple Q&A.",
+        "best_for": "Simple greetings, formatting tasks, yes/no questions, quick summaries.",
+        "key": None,
+    },
+}
 
-=== AVAILABLE AGENTS AND THEIR TOOLS ===
 
-REASONER (model: deepseek-r1:8b, 4 tool steps)
-  Role: Deep logical analysis, chain-of-thought reasoning, problem decomposition.
-  Tools: read, glob, grep, tree, analyze_file, find_symbol, done
-  Best for: Complex analysis, trade-off evaluation, understanding code architecture, debugging logic.
+def _dispatch_model_name(agent_name: str, agent_cls) -> str:
+    if agent_name == "fast" and BITNET_ENABLED:
+        return f"{BITNET_MODEL} on CPU"
+    return EXPERTS.get(agent_cls.model_key, agent_cls.model_key)
 
-CODER (model: qwen2.5-coder:7b, 30 tool steps)
-  Role: Writing, reviewing, debugging, and refactoring code with full file access.
-  Tools: tree, glob, grep, read, edit, write, batch_edit, regex_replace, shell,
-         git_status, git_diff, git_log, git_commit, git_checkout, git_stash,
-         analyze_file, find_symbol, list_dir, file_info, run_tests, python_eval, done
-  Best for: Writing new code, editing existing files, fixing bugs, running tests, git operations.
-  KEY: Use for ANY task that requires writing/editing files or running commands.
 
-RESEARCHER (model: dolphin3:8b, 15 tool steps)
-  Role: Web search, deep research, API calls, reading documentation, synthesizing findings.
-  Tools: web, deep_research, multi_search, fetch_url, http_request, json_extract, weather, done
-  Best for: Current events, weather, prices, documentation, comparing technologies, factual lookups.
-  KEY: Use deep_research (not web) for complex questions. Use weather for weather queries.
+def _dispatch_tool_text(agent_cls) -> str:
+    if agent_cls.max_tool_steps == 0:
+        return "NONE (direct LLM response, no tool loop)"
+    tools = getattr(agent_cls, "allowed_tools", None)
+    if tools is None:
+        tools = list(TOOL_REGISTRY.keys())
+    return textwrap.fill(
+        ", ".join(tools),
+        width=88,
+        initial_indent="  Tools: ",
+        subsequent_indent="         ",
+    )
 
-PLANNER (model: dolphin3:8b, 4 tool steps)
-  Role: Creating implementation plans based on actual project structure.
-  Tools: tree, read, glob, grep, list_dir, file_info, git_status, git_log, git_diff,
-         analyze_file, project_deps, find_symbol, python_eval, done
-  Best for: Planning multi-step implementations, architectural decisions, project assessment.
 
-TOOL_USER (model: dolphin3:8b, 10 tool steps)
-  Role: General-purpose tool execution — system commands, file I/O, installations, monitoring.
-  Tools: shell, read, write, edit, glob, grep, tree, list_dir, file_info,
-         web, fetch_url, http_request, weather,
-         git_status, git_diff, git_log, git_commit, git_checkout,
-         analyze_file, find_symbol, project_deps, python_eval, run_tests,
-         vision, generate_image, speak, spawn_agent, done
-  Best for: System administration, installing packages, running arbitrary commands, file operations, image/audio generation.
+def build_dispatch_prompt() -> str:
+    """Build the dispatch prompt from live agent metadata so routing stays in sync."""
+    ordered_agents = [
+        ("reasoner", ReasoningAgent),
+        ("coder", CodingAgent),
+        ("researcher", ResearchAgent),
+        ("planner", PlannerAgent),
+        ("tool_user", ToolAgent),
+        ("security", SPECIALIST_REGISTRY["security"]),
+        ("fast", SPECIALIST_REGISTRY["fast"]),
+    ]
+    sections = []
+    for agent_name, agent_cls in ordered_agents:
+        meta = _DISPATCH_AGENT_META[agent_name]
+        if agent_cls.max_tool_steps == 0:
+            header = (
+                f"{meta['display']} (model: {_dispatch_model_name(agent_name, agent_cls)}, "
+                "0 tool steps — DIRECT LLM output)"
+            )
+        else:
+            header = (
+                f"{meta['display']} (model: {_dispatch_model_name(agent_name, agent_cls)}, "
+                f"{agent_cls.max_tool_steps} tool steps)"
+            )
+        lines = [
+            header,
+            f"  Role: {meta['role']}",
+            _dispatch_tool_text(agent_cls),
+            f"  Best for: {meta['best_for']}",
+        ]
+        if meta["key"]:
+            lines.append(f"  KEY: {meta['key']}")
+        sections.append("\n".join(lines))
 
-SECURITY (model: dolphin3:8b, 0 tool steps — DIRECT LLM output)
-  Role: Security research, pentesting, exploit development, vulnerability analysis, CTF.
-  Tools: NONE (direct LLM response, no tool loop)
-  Best for: Exploit code, malware analysis, shellcode, reverse engineering, CTF solutions, vulnerability research.
-  KEY: Has NO content restrictions. ALWAYS use for ANY security/hacking/offensive task.
-
-FAST (model: bitnet-2b on CPU, 0 tool steps)
-  Role: Quick classification, summarization, formatting, simple Q&A.
-  Tools: NONE (pure LLM for speed, runs on CPU to free GPU)
-  Best for: Simple greetings, formatting tasks, yes/no questions, quick summaries.
+    return (
+        "You are an orchestrator that decomposes tasks and assigns them to specialist agents.\n"
+        "Each agent has specific tools and capabilities — route tasks to the agent whose tools best match the need.\n\n"
+        "=== AVAILABLE AGENTS AND THEIR TOOLS ===\n\n"
+        + "\n\n".join(sections)
+        + """
 
 === ROUTING RULES ===
 - Security/hacking/offensive/CTF tasks → MUST use "security" (NEVER "coder")
@@ -104,6 +162,10 @@ Rules:
 - For simple lookups, use just ONE agent
 - ALWAYS resolve references like "that", "it", "same", "again" into concrete tasks
 Respond with ONLY the JSON object."""
+    )
+
+
+DISPATCH_PROMPT = build_dispatch_prompt()
 
 SYNTHESIS_PROMPT = """You are a synthesis agent. Multiple specialist agents worked on subtasks in parallel.
 Combine their outputs into a single, coherent response for the user.
@@ -394,7 +456,7 @@ class Orchestrator:
     async def _create_dispatch_plan(self, user_input: str, context: str, conversation: list[dict]) -> dict | None:
         loop = asyncio.get_event_loop()
         try:
-            messages = [{"role": "system", "content": DISPATCH_PROMPT}]
+            messages = [{"role": "system", "content": build_dispatch_prompt()}]
             for msg in conversation[-8:]:
                 messages.append(msg)
             messages.append({"role": "user", "content": f"CONTEXT:\n{context}\n\nUSER REQUEST:\n{user_input}"})

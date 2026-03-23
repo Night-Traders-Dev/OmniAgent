@@ -16,6 +16,7 @@ import sys
 import asyncio
 import logging
 from typing import Any
+from src.tools import TOOL_REGISTRY, _build_generic_input_schema
 
 log = logging.getLogger("mcp")
 
@@ -517,6 +518,19 @@ TOOL_SCHEMAS: dict[str, dict] = {
 }
 
 
+def get_runtime_tool_schemas() -> dict[str, dict]:
+    """Return built-in schemas plus generic fallback schemas for runtime-registered tools."""
+    schemas = dict(TOOL_SCHEMAS)
+    for name, info in TOOL_REGISTRY.items():
+        if name == "done" or name in schemas:
+            continue
+        schemas[name] = {
+            "description": info["description"],
+            "inputSchema": _build_generic_input_schema(info.get("args", "")),
+        }
+    return schemas
+
+
 # ============================================================
 # JSON-RPC 2.0 helpers
 # ============================================================
@@ -617,7 +631,7 @@ class MCPProtocolHandler:
 
     def _handle_tools_list(self, params: dict) -> dict:
         tools = []
-        for name, schema in TOOL_SCHEMAS.items():
+        for name, schema in get_runtime_tool_schemas().items():
             tools.append({
                 "name": name,
                 "description": schema["description"],
@@ -628,8 +642,9 @@ class MCPProtocolHandler:
     def _handle_tools_call(self, params: dict) -> dict:
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
+        runtime_schemas = get_runtime_tool_schemas()
 
-        if tool_name not in TOOL_SCHEMAS:
+        if tool_name not in runtime_schemas:
             return {
                 "content": [{"type": "text", "text": f"Unknown tool: {tool_name}"}],
                 "isError": True,
@@ -669,7 +684,7 @@ class MCPProtocolHandler:
                 {
                     "uri": "omniagent://tools",
                     "name": "Tool Registry",
-                    "description": "All 47 registered tools with descriptions",
+                    "description": f"All {len(get_runtime_tool_schemas())} registered tools with descriptions",
                     "mimeType": "application/json",
                 },
             ],

@@ -13,7 +13,7 @@ from src.state import state
 from src.tools import (
     parse_json, execute_tool, TOOL_REGISTRY, TOOL_TIMEOUTS,
     compress_tool_result, detect_uncertainty, ToolErrorKind,
-    TOOL_DETAILED_REFERENCE,
+    TOOL_DETAILED_REFERENCE, build_tool_reference, get_registered_tools,
 )
 
 
@@ -60,6 +60,8 @@ class BaseAgent:
     model_key: str = "general"
     system_prompt: str = "You are a helpful assistant."
     max_tool_steps: int = 0
+    allowed_tools: list[str] | None = None
+    allow_external_tools: bool = False
 
     def __init__(self):
         self.status = AgentStatus.IDLE
@@ -85,6 +87,36 @@ class BaseAgent:
         if self.model_key == "fast" and BITNET_ENABLED:
             return BITNET_CLIENT
         return CLIENT
+
+    def _available_tool_names(self) -> list[str]:
+        if self.max_tool_steps <= 0:
+            return []
+        available = get_registered_tools(include_external=self.allow_external_tools)
+        if self.allowed_tools is None:
+            names = list(available.keys())
+        else:
+            names = [name for name in self.allowed_tools if name in available]
+        if "done" not in names:
+            names.append("done")
+        return names
+
+    def _tool_reference(self) -> str:
+        names = self._available_tool_names()
+        if not names:
+            return TOOL_DETAILED_REFERENCE
+        return build_tool_reference(names)
+
+    def _is_tool_allowed(self, tool_name: str) -> bool:
+        if tool_name == "done":
+            return True
+        return tool_name in self._available_tool_names()
+
+    def _tool_access_error(self, tool_name: str) -> str:
+        allowed = ", ".join(self._available_tool_names())
+        return (
+            f"ERROR[blocked]: Tool '{tool_name}' is not available to agent "
+            f"'{self.name}'. Allowed tools: {allowed}"
+        )
 
     async def execute(self, task: str, context: str = "", conversation: list[dict] | None = None) -> AgentResult:
         self.status = AgentStatus.RUNNING
@@ -154,11 +186,12 @@ class BaseAgent:
 
     async def _execute_teach_mode(self, task: str, context: str, conversation: list[dict] | None, loop) -> AgentResult:
         """In teach mode, explain what tools would be used but don't execute them."""
+        tool_reference = self._tool_reference()
         teach_system = (
             f"{self.system_prompt}\n\n"
             f"{self._build_environment_context()}\n\n"
             "You are in TEACHING mode. The user wants to LEARN.\n"
-            f"Available tools (DO NOT EXECUTE, just explain what you would use and why):\n{TOOL_DETAILED_REFERENCE}\n\n"
+            f"Available tools for you (DO NOT EXECUTE, just explain what you would use and why):\n{tool_reference}\n\n"
             "For each step:\n"
             "1. Explain WHAT you would do and WHY\n"
             "2. Show the exact tool call JSON as a code block\n"
@@ -195,12 +228,15 @@ class BaseAgent:
 
         from src.agents.specialists import EXECUTE_MODE_DIRECTIVE
         env_context = self._build_environment_context()
+        available_tool_names = self._available_tool_names()
+        tool_reference = self._tool_reference()
 
         tool_system = (
             f"{self.system_prompt}\n\n"
             f"{env_context}\n\n"
             f"{EXECUTE_MODE_DIRECTIVE}\n\n"
-            f"{TOOL_DETAILED_REFERENCE}\n\n"
+            f"TOOLS AVAILABLE TO YOU RIGHT NOW ({len(available_tool_names)}):\n"
+            f"{tool_reference}\n\n"
             "HOW TO CALL TOOLS:\n"
             "Respond with ONLY a JSON object — no text before or after:\n"
             '{"tool": "tool_name", "args": {"arg1": "value1"}, "reasoning": "why I chose this tool"}\n\n'
@@ -210,6 +246,7 @@ class BaseAgent:
             "- Your FIRST response MUST be a tool call JSON, not plain text.\n"
             "- NEVER explain steps. EXECUTE them with tool calls.\n"
             "- EVERY response must be exactly ONE JSON tool call.\n"
+            "- ONLY call tools that appear in the tool reference above.\n"
             "- Choose the RIGHT tool: use 'edit' for small changes, 'write' for new files, 'batch_edit' for multi-file changes.\n"
             "- Use 'grep' to find code before editing. Use 'read' to verify file contents. Use 'glob' to discover files.\n"
             "- After write/edit, use 'run_tests' to verify your changes work.\n"
@@ -303,15 +340,21 @@ class BaseAgent:
                 "git_commit": "git", "git_checkout": "git",
                 "git_stash": "git",
             }
+            ts = datetime.now().strftime("%H:%M:%S")
             toggle = _tool_toggle_map.get(tool_name)
+            tool_allowed = self._is_tool_allowed(tool_name)
             tool_blocked = toggle is not None and not state.enabled_tools.get(toggle, True)
 
-            if tool_blocked:
+            if not tool_allowed:
+                tool_result = self._tool_access_error(tool_name)
+                consecutive_failures += 1
+                state.progress_log.append(f"[{ts}]   [{self.name}] error: {tool_result[:120]}")
+            elif tool_blocked:
                 tool_result = f"ERROR[blocked]: Tool '{tool_name}' is disabled by user. Use a different approach or skip this step."
                 consecutive_failures += 1
+                state.progress_log.append(f"[{ts}]   [{self.name}] error: {tool_result[:120]}")
             else:
                 # Tier 4: Stream tool step progress (sanitize for log injection + redact secrets)
-                ts = datetime.now().strftime("%H:%M:%S")
                 safe_args = json.dumps(tool_args)[:80].replace('\n', '\\n').replace('\r', '')
                 # Redact tokens/passwords/keys from logs
                 import re as _re
@@ -414,44 +457,67 @@ class BaseAgent:
     @staticmethod
     def _build_environment_context() -> str:
         if BaseAgent._cached_env is not None:
-            # Only refresh the timestamp
+            env_prefix = BaseAgent._cached_env
+        else:
             from datetime import datetime
-            now = datetime.now()
-            return BaseAgent._cached_env.replace("__TIMESTAMP__", now.strftime('%A, %B %d, %Y at %I:%M %p').strip())
+            import platform
+            import os
+            from src.config import EXPERTS
+
+            try:
+                import subprocess as _sp
+                _r = _sp.run(['hostname', '-I'], capture_output=True, text=True, timeout=3)
+                net_parts = _r.stdout.strip().split()
+                network_ip = net_parts[0] if net_parts else 'unknown'
+            except Exception:
+                network_ip = 'unknown'
+
+            BaseAgent._cached_env = (
+                f"\n\nENVIRONMENT:\n"
+                f"- Current date and time: __TIMESTAMP__\n"
+                f"- Host: {platform.node()} ({platform.system()} {platform.release()}, {platform.machine()})\n"
+                f"- User: {os.environ.get('USER', 'unknown')}\n"
+                f"- Working directory: {os.getcwd()}\n"
+                f"- Python: {platform.python_version()}\n"
+                f"- Network: {network_ip}\n"
+                f"\nYou are OmniAgent v{VERSION} running locally on this machine.\n"
+                f"You have multiple specialist agents: {', '.join(EXPERTS.keys())}.\n"
+                f"Models: {', '.join(f'{k}={v}' for k,v in EXPERTS.items())}.\n"
+                f"You can read/write/edit files on THIS machine. You run commands on THIS machine.\n"
+                f"When asked about 'your system' or 'what OS', answer about THIS host — not in general terms.\n"
+                f"When asked about GitHub, Google, etc — check if integrations are connected and use them.\n"
+            )
+            env_prefix = BaseAgent._cached_env
 
         from datetime import datetime
-        import platform
-        import os
-        from src.config import EXPERTS
-
-        try:
-            import subprocess as _sp
-            _r = _sp.run(['hostname', '-I'], capture_output=True, text=True, timeout=3)
-            net_parts = _r.stdout.strip().split()
-            network_ip = net_parts[0] if net_parts else 'unknown'
-        except Exception:
-            network_ip = 'unknown'
-
-        BaseAgent._cached_env = (
-            f"\n\nENVIRONMENT:\n"
-            f"- Current date and time: __TIMESTAMP__\n"
-            f"- Host: {platform.node()} ({platform.system()} {platform.release()}, {platform.machine()})\n"
-            f"- User: {os.environ.get('USER', 'unknown')}\n"
-            f"- Working directory: {os.getcwd()}\n"
-            f"- Python: {platform.python_version()}\n"
-            f"- Network: {network_ip}\n"
-            f"\nYou are OmniAgent v{VERSION} — a modular autonomous AI agent framework running locally with 47 tools and 7 specialist agents.\n"
-            f"You have multiple specialist agents: {', '.join(EXPERTS.keys())}.\n"
-            f"Models: {', '.join(f'{k}={v}' for k,v in EXPERTS.items())}.\n"
-            f"You have 47 tools across 8 categories: file I/O (read/write/edit/glob/grep/tree), "
-            f"shell execution, web search (web/deep_research/fetch_url), git, media (vision/image gen/TTS), "
-            f"system (process/network/docker), data (database/PDF/archive), and sub-agent spawning.\n"
-            f"You can read/write/edit files on THIS machine. You run commands on THIS machine.\n"
-            f"When asked about 'your system' or 'what OS', answer about THIS host — not in general terms.\n"
-            f"When asked about GitHub, Google, etc — check if integrations are connected and use them.\n"
-        )
         now = datetime.now()
-        return BaseAgent._cached_env.replace("__TIMESTAMP__", now.strftime('%A, %B %d, %Y at %I:%M %p').strip())
+        from src.agents.specialists import SPECIALIST_REGISTRY
+        external_tool_count = 0
+        try:
+            from src.mcp import get_all_mcp_tools
+            external_tool_count = len(get_all_mcp_tools())
+        except Exception:
+            pass
+        local_tool_count = len(TOOL_REGISTRY)
+        total_tool_count = local_tool_count + external_tool_count
+        if external_tool_count:
+            tool_line = (
+                f"You currently have {local_tool_count} built-in tools plus "
+                f"{external_tool_count} connected MCP tools ({total_tool_count} tools total).\n"
+            )
+        else:
+            tool_line = f"You currently have {local_tool_count} tools.\n"
+        agent_line = f"You currently have {len(SPECIALIST_REGISTRY)} specialist agents.\n"
+        category_line = (
+            "Built-in tool categories: file I/O, shell execution, web search, git, media, "
+            "system, data, and sub-agent spawning.\n"
+        )
+        return (
+            env_prefix.replace("__TIMESTAMP__", now.strftime('%A, %B %d, %Y at %I:%M %p').strip())
+            + tool_line
+            + category_line
+            + agent_line
+        )
 
     def _build_messages(self, task: str, context: str, conversation: list[dict] | None) -> list[dict]:
         system_content = self.system_prompt

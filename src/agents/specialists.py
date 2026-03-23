@@ -39,6 +39,7 @@ class ReasoningAgent(BaseAgent):
     role = "deep logical reasoning, analysis, planning, and problem decomposition"
     model_key = "reasoning"
     max_tool_steps = 4  # Can read files to reason about them
+    allowed_tools = ["read", "glob", "grep", "tree", "analyze_file", "find_symbol", "project_deps", "done"]
     system_prompt = (
         "You are a deep reasoning specialist. You examine code and data to produce thorough analysis.\n\n"
         "YOUR TOOLS (use these — the full reference with examples is provided below):\n"
@@ -68,6 +69,13 @@ class CodingAgent(BaseAgent):
     role = "writing, reviewing, debugging, and refactoring code with file access"
     model_key = "coding"
     max_tool_steps = 30  # Expanded for complex refactors (was 8)
+    allowed_tools = [
+        "tree", "glob", "grep", "read", "list_dir", "file_info", "analyze_file", "find_symbol",
+        "project_deps", "edit", "write", "batch_edit", "regex_replace", "diff_preview",
+        "run_tests", "shell", "python_eval", "sandbox_run",
+        "git_status", "git_diff", "git_log", "git_commit", "git_checkout", "git_stash",
+        "done",
+    ]
     system_prompt = (
         "You are an autonomous coding agent. You EXECUTE tasks using tools — never explain, just do.\n\n"
         "YOUR TOOLS (full reference with JSON examples provided below):\n"
@@ -107,6 +115,7 @@ class ResearchAgent(BaseAgent):
     role = "web search, deep research, API calls, reading documentation, synthesizing findings"
     model_key = "general"
     max_tool_steps = 15  # Expanded for deep research chains (was 8)
+    allowed_tools = ["web", "deep_research", "multi_search", "fetch_url", "http_request", "json_extract", "weather", "done"]
     system_prompt = (
         "You are an autonomous research agent. You EXECUTE searches — never say 'you can search for'.\n\n"
         "YOUR TOOLS (full reference with JSON examples provided below):\n"
@@ -160,6 +169,11 @@ class PlannerAgent(BaseAgent):
     role = "creating implementation plans with actual project awareness"
     model_key = "general"
     max_tool_steps = 4
+    allowed_tools = [
+        "tree", "glob", "grep", "read", "list_dir", "file_info",
+        "analyze_file", "project_deps", "find_symbol",
+        "git_status", "git_log", "git_diff", "python_eval", "done",
+    ]
     system_prompt = (
         "You are a planning agent. You EXPLORE the codebase with tools, then produce a concrete plan.\n\n"
         "YOUR TOOLS (full reference with JSON examples provided below):\n"
@@ -193,10 +207,11 @@ class ToolAgent(BaseAgent):
     role = "executing system commands, file operations, installations, and codebase analysis"
     model_key = "general"
     max_tool_steps = 10
+    allow_external_tools = True
     system_prompt = (
-        "You are an autonomous system agent with access to ALL 47 tools. You EXECUTE directly — never explain.\n\n"
+        "You are an autonomous system agent with access to all registered tools. You EXECUTE directly — never explain.\n\n"
         "YOUR TOOLS (full reference with JSON examples provided below):\n"
-        "  FILES:   read, write, edit, glob, grep, tree, list_dir, file_info, batch_edit, regex_replace\n"
+        "  FILES:   read, write, edit, glob, grep, tree, list_dir, file_info, batch_edit, regex_replace, diff_preview\n"
         "  SHELL:   shell, python_eval, run_tests, sandbox_run\n"
         "  WEB:     web, deep_research, multi_search, fetch_url, http_request, json_extract, weather\n"
         "  GIT:     git_status, git_diff, git_log, git_commit, git_checkout, git_stash\n"
@@ -204,7 +219,7 @@ class ToolAgent(BaseAgent):
         "  MEDIA:   vision, generate_image, speak, screenshot\n"
         "  SYSTEM:  process_list, kill_process, network_info, env_get, env_set, docker\n"
         "  DATA:    database, pdf_read, archive\n"
-        "  META:    spawn_agent, done\n\n"
+        "  META:    spawn_agent, done, connected MCP tools when present\n\n"
         "QUICK ACTIONS:\n"
         "- 'install X'        → shell({\"cmd\": \"pip install X\"}) or shell({\"cmd\": \"npm install X\"})\n"
         "- 'run X'            → shell({\"cmd\": \"X\"})\n"
@@ -221,7 +236,8 @@ class ToolAgent(BaseAgent):
         "- NEVER respond with plain text. ALWAYS respond with a JSON tool call.\n"
         "- After executing, use done with a summary of RESULTS (past tense).\n"
         "- If one tool fails, try an alternative approach.\n"
-        "- Use spawn_agent to delegate complex sub-tasks to specialist agents."
+        "- Use spawn_agent to delegate complex sub-tasks to specialist agents.\n"
+        "- If connected external MCP tools appear in your tool reference, call them by their server__tool name."
     )
 
 

@@ -998,6 +998,56 @@ TOOL_REGISTRY = {
     "network_info": {"fn": "network_info", "description": "Show network interfaces and IP addresses", "args": ""},
 }
 
+
+def _build_generic_input_schema(args_spec: str) -> dict:
+    """Build a permissive JSON schema from a registry args string.
+
+    Used as a fallback for dynamically registered tools such as plugins.
+    """
+    properties: dict[str, dict] = {}
+    required: list[str] = []
+    for raw_arg in args_spec.split(","):
+        raw_arg = raw_arg.strip()
+        if not raw_arg:
+            continue
+        optional = raw_arg.startswith("[") and raw_arg.endswith("]")
+        arg_name = raw_arg.strip("[]")
+        properties[arg_name] = {
+            "type": "string",
+            "description": f"Parameter: {arg_name}",
+        }
+        if not optional:
+            required.append(arg_name)
+    schema = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
+
+
+def get_registered_tools(include_external: bool = False) -> dict[str, dict]:
+    """Return local tools, optionally augmented with connected external MCP tools."""
+    tools = dict(TOOL_REGISTRY)
+    if not include_external:
+        return tools
+
+    try:
+        from src.mcp import get_all_mcp_tools
+        for tool in get_all_mcp_tools():
+            schema = tool.get("inputSchema", {}) or {}
+            props = schema.get("properties", {}) or {}
+            required = set(schema.get("required", []) or [])
+            args = []
+            for prop_name in props:
+                args.append(prop_name if prop_name in required else f"[{prop_name}]")
+            tools[tool["name"]] = {
+                "fn": None,
+                "description": tool.get("description", ""),
+                "args": ", ".join(args),
+            }
+    except Exception:
+        pass
+    return tools
+
 # ============================================================
 # Comprehensive tool reference — injected into agent prompts
 # ============================================================
@@ -1172,11 +1222,17 @@ def build_tool_reference(tool_names: list[str] | None = None) -> str:
     """Build a tool reference string for a specific set of tools, or all tools if None."""
     if tool_names is None:
         return TOOL_DETAILED_REFERENCE
+    available_tools = get_registered_tools(include_external=True)
+    builtin_tool_names = [name for name in tool_names if name in TOOL_REGISTRY]
+    extra_tool_names = [name for name in tool_names if name not in TOOL_REGISTRY and name in available_tools]
+    if builtin_tool_names == list(TOOL_REGISTRY.keys()) and not extra_tool_names:
+        return TOOL_DETAILED_REFERENCE
     lines = []
     for name in tool_names:
-        entry = TOOL_REGISTRY.get(name)
+        entry = available_tools.get(name)
         if entry:
-            lines.append(f"- {name}: {entry['description']} (args: {entry['args']})")
+            arg_text = entry["args"] or "none"
+            lines.append(f"- {name}: {entry['description']} (args: {arg_text})")
     return "\n".join(lines)
 
 
