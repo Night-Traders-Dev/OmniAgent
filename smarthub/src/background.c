@@ -14,6 +14,7 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -26,6 +27,12 @@ static float randf_range(float lo, float hi) { return lo + randf() * (hi - lo); 
 /* ═══ Color palettes ═══ */
 /* Deep ocean / aurora theme (warm-cool mix, cozy feel) */
 typedef struct { Uint8 r, g, b; } RGB;
+typedef struct {
+    float position;
+    RGB top;
+    RGB bottom;
+    RGB accent;
+} ThemeStop;
 
 static const RGB palette[] = {
     {100, 140, 220},  /* soft blue */
@@ -38,6 +45,71 @@ static const RGB palette[] = {
     {160, 100, 140},  /* mauve */
 };
 #define PALETTE_SIZE (sizeof(palette) / sizeof(palette[0]))
+
+static const ThemeStop theme_stops[] = {
+    {0.00f, {8, 10, 18}, {16, 16, 30}, {24, 18, 62}},
+    {0.22f, {14, 12, 22}, {30, 18, 40}, {88, 52, 92}},
+    {0.38f, {10, 14, 24}, {20, 28, 42}, {42, 94, 126}},
+    {0.60f, {8, 14, 24}, {18, 26, 40}, {26, 110, 92}},
+    {0.78f, {16, 11, 20}, {34, 18, 32}, {112, 66, 44}},
+    {0.90f, {10, 10, 20}, {20, 14, 32}, {68, 30, 88}},
+    {1.00f, {8, 10, 18}, {16, 16, 30}, {24, 18, 62}},
+};
+#define THEME_STOP_COUNT (sizeof(theme_stops) / sizeof(theme_stops[0]))
+
+/* ═══ Theme helpers ═══ */
+
+static Uint8 lerp_u8(Uint8 a, Uint8 b, float t) {
+    return (Uint8)(a + (b - a) * t);
+}
+
+static RGB lerp_rgb(RGB a, RGB b, float t) {
+    RGB out = {
+        lerp_u8(a.r, b.r, t),
+        lerp_u8(a.g, b.g, t),
+        lerp_u8(a.b, b.b, t),
+    };
+    return out;
+}
+
+static RGB tint_rgb(RGB base, RGB accent, float amount) {
+    return lerp_rgb(base, accent, amount);
+}
+
+static float current_day_progress(void) {
+    time_t now = time(NULL);
+    struct tm local_tm;
+#if defined(_POSIX_VERSION)
+    localtime_r(&now, &local_tm);
+#else
+    struct tm *tmp = localtime(&now);
+    if (!tmp) return 0.0f;
+    local_tm = *tmp;
+#endif
+    float seconds =
+        (float)local_tm.tm_hour * 3600.0f +
+        (float)local_tm.tm_min * 60.0f +
+        (float)local_tm.tm_sec;
+    return seconds / 86400.0f;
+}
+
+static void sample_day_theme(float progress, RGB *top, RGB *bottom, RGB *accent) {
+    float clamped = progress;
+    if (clamped < 0.0f) clamped = 0.0f;
+    if (clamped > 1.0f) clamped = 1.0f;
+
+    int next = 1;
+    while (next < (int)THEME_STOP_COUNT && theme_stops[next].position < clamped) next++;
+    if (next >= (int)THEME_STOP_COUNT) next = (int)THEME_STOP_COUNT - 1;
+    int prev = next > 0 ? next - 1 : 0;
+
+    float span = theme_stops[next].position - theme_stops[prev].position;
+    float t = span > 0.0f ? (clamped - theme_stops[prev].position) / span : 0.0f;
+
+    *top = lerp_rgb(theme_stops[prev].top, theme_stops[next].top, t);
+    *bottom = lerp_rgb(theme_stops[prev].bottom, theme_stops[next].bottom, t);
+    *accent = lerp_rgb(theme_stops[prev].accent, theme_stops[next].accent, t);
+}
 
 /* ═══ Initialization ═══ */
 
@@ -134,9 +206,10 @@ static void render_soft_circle(SDL_Renderer *ren, int cx, int cy, float radius,
     }
 }
 
-static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h) {
+static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h, RGB accent) {
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(ren, wave->r, wave->g, wave->b, wave->a);
+    RGB wave_color = tint_rgb((RGB){wave->r, wave->g, wave->b}, accent, 0.18f);
+    SDL_SetRenderDrawColor(ren, wave_color.r, wave_color.g, wave_color.b, wave->a);
 
     float base_y = wave->y_base * h;
 
@@ -159,9 +232,9 @@ static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h) {
         /* Glow line at the wave crest */
         if (prev_y >= 0) {
             Uint8 glow_a = (Uint8)(wave->a * 3 > 255 ? 255 : wave->a * 3);
-            SDL_SetRenderDrawColor(ren, wave->r, wave->g, wave->b, glow_a);
+            SDL_SetRenderDrawColor(ren, wave_color.r, wave_color.g, wave_color.b, glow_a);
             SDL_RenderDrawLine(ren, x - 2, prev_y, x, iy);
-            SDL_SetRenderDrawColor(ren, wave->r, wave->g, wave->b, wave->a);
+            SDL_SetRenderDrawColor(ren, wave_color.r, wave_color.g, wave_color.b, wave->a);
         }
         prev_y = iy;
     }
@@ -169,30 +242,37 @@ static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h) {
 
 void bg_render(AnimatedBG *bg, SDL_Renderer *ren, int w, int h) {
     if (!bg->initialized) return;
+    RGB top_color, bottom_color, accent_color;
+    sample_day_theme(current_day_progress(), &top_color, &bottom_color, &accent_color);
 
     /* Base gradient — dark at top, slightly lighter at bottom */
     for (int y = 0; y < h; y += 4) {
         float t = (float)y / (float)h;
-        Uint8 r = (Uint8)(bg->bg_r + t * 8);
-        Uint8 g = (Uint8)(bg->bg_g + t * 6);
-        Uint8 b = (Uint8)(bg->bg_b + t * 12);
+        RGB row = lerp_rgb(top_color, bottom_color, t);
+        Uint8 r = row.r;
+        Uint8 g = row.g;
+        Uint8 b = row.b;
         SDL_SetRenderDrawColor(ren, r, g, b, 255);
         SDL_Rect strip = {0, y, w, 4};
         SDL_RenderFillRect(ren, &strip);
     }
 
     /* Subtle color shift over time */
-    float shift = sinf(bg->time * 0.05f) * 0.5f + 0.5f;
-    Uint8 tint_r = (Uint8)(20 * shift);
-    Uint8 tint_b = (Uint8)(20 * (1.0f - shift));
+    float pulse = 0.85f + 0.15f * (sinf(bg->time * 0.05f) * 0.5f + 0.5f);
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
-    SDL_SetRenderDrawColor(ren, tint_r, 0, tint_b, 3);
+    SDL_SetRenderDrawColor(
+        ren,
+        accent_color.r,
+        accent_color.g,
+        accent_color.b,
+        (Uint8)(6.0f * pulse)
+    );
     SDL_Rect full = {0, 0, w, h};
     SDL_RenderFillRect(ren, &full);
 
     /* Render waves (back to front) */
     for (int i = 0; i < bg->wave_count; i++) {
-        render_wave(ren, &bg->waves[i], w, h);
+        render_wave(ren, &bg->waves[i], w, h, accent_color);
     }
 
     /* Render particles */
@@ -201,8 +281,9 @@ void bg_render(AnimatedBG *bg, SDL_Renderer *ren, int w, int h) {
         float pulse = 0.6f + 0.4f * sinf(p->pulse_phase);
         float alpha = p->alpha * pulse;
         float radius = p->radius * (0.8f + 0.2f * pulse);
+        RGB particle_color = tint_rgb((RGB){p->r, p->g, p->b}, accent_color, 0.24f);
         render_soft_circle(ren, (int)p->x, (int)p->y, radius,
-                           p->r, p->g, p->b, alpha);
+                           particle_color.r, particle_color.g, particle_color.b, alpha);
     }
 
     /* Reset blend mode */
