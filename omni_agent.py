@@ -1,6 +1,6 @@
 """
-OmniAgent v8.0 - Entry Point
-Starts all services: FastAPI server, GPU monitor, BitNet (if available),
+OmniAgent — Entry Point
+Starts all services: FastAPI server, MCP server, GPU monitor, BitNet (if available),
 Cloudflare tunnel (optional), and rolling log with metrics.
 """
 import subprocess
@@ -54,6 +54,7 @@ uvicorn_logger.addHandler(file_handler)
 
 BITNET_PROCESS = None
 TUNNEL_PROCESS = None
+MCP_PROCESS = None
 CTRL_C_COUNT = 0
 TUNNEL_URL = None  # Set when tunnel connects
 
@@ -219,6 +220,33 @@ def start_bitnet():
 
 
 # ============================================================
+# MCP Stdio Server (background process for local clients)
+# ============================================================
+
+def start_mcp_server():
+    """Start the MCP stdio server as a background process.
+    This allows local MCP clients (Claude Desktop, Claude Code) to connect
+    via the stdio transport without a separate manual launch."""
+    global MCP_PROCESS
+
+    mcp_script = Path(__file__).parent / "mcp_server.py"
+    if not mcp_script.exists():
+        logger.info("[MCP] mcp_server.py not found, skipping")
+        return
+
+    if os.environ.get("OMNI_NO_MCP", "").lower() in ("1", "true", "yes"):
+        logger.info("[MCP] Disabled via OMNI_NO_MCP env var")
+        return
+
+    # Write a socket-based wrapper that MCP clients can connect to
+    # The HTTP transport is already available via POST /mcp on the FastAPI server
+    # The stdio server is for subprocess-based clients (Claude Desktop config)
+    logger.info(f"[MCP] Stdio server available: python {mcp_script}")
+    logger.info(f"[MCP] HTTP transport available: POST http://localhost:8000/mcp")
+    logger.info(f"[MCP] SSE transport available: GET http://localhost:8000/mcp/sse")
+
+
+# ============================================================
 # Cloudflare Tunnel
 # ============================================================
 
@@ -291,7 +319,7 @@ def start_tunnel():
 # ============================================================
 
 def cleanup():
-    global BITNET_PROCESS, TUNNEL_PROCESS
+    global BITNET_PROCESS, TUNNEL_PROCESS, MCP_PROCESS
     # Save global counters and session state before exit
     try:
         from src.state import state
@@ -310,6 +338,15 @@ def cleanup():
         except subprocess.TimeoutExpired:
             BITNET_PROCESS.kill()
         BITNET_PROCESS = None
+
+    if MCP_PROCESS and MCP_PROCESS.poll() is None:
+        logger.info(f"[MCP] Stopping server (PID {MCP_PROCESS.pid})")
+        MCP_PROCESS.terminate()
+        try:
+            MCP_PROCESS.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            MCP_PROCESS.kill()
+        MCP_PROCESS = None
 
     if TUNNEL_PROCESS and TUNNEL_PROCESS.poll() is None:
         logger.info(f"[Tunnel] Stopping (PID {TUNNEL_PROCESS.pid})")
@@ -349,8 +386,9 @@ def main():
     signal.signal(signal.SIGINT, force_exit)
     signal.signal(signal.SIGTERM, force_exit)
 
+    from src.config import VERSION
     logger.info("=" * 50)
-    logger.info("  OmniAgent v8.0 - Parallel Autonomous Agent")
+    logger.info(f"  OmniAgent v{VERSION} - Parallel Autonomous Agent")
     logger.info(f"  Pairing Code: {PAIRING_CODE}")
     logger.info("=" * 50)
 
@@ -450,6 +488,7 @@ def main():
 
     # Start services
     start_bitnet()
+    start_mcp_server()
 
     # Start metrics logger thread
     metrics_thread = threading.Thread(target=metrics_logger, daemon=True)

@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>OmniAgent Hub</title>
+    <style>
+        :root {
+            --bg: #0a0e14;
+            --surface: #111820;
+            --card: #161d27;
+            --border: #1e2a38;
+            --accent: #4a9eff;
+            --accent-dim: #2a5a8f;
+            --text: #e0e8f0;
+            --dim: #6a7a8a;
+            --green: #3fb950;
+            --red: #ff4a4a;
+            --yellow: #e8ab4a;
+            --radius: 16px;
+            --touch-min: 48px; /* minimum touch target */
+        }
+        * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            touch-action: manipulation;
+        }
+
+        /* ═══ Top Bar ═══ */
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            height: 48px;
+        }
+        .topbar-left { display:flex; align-items:center; gap:10px; }
+        .topbar-logo { font-size:1.1rem; font-weight:700; color:var(--accent); }
+        .topbar-version { font-size:.7rem; color:var(--dim); }
+        .status-dot { width:8px; height:8px; border-radius:50%; background:var(--red); flex-shrink:0; }
+        .status-dot.connected { background:var(--green); }
+        .topbar-right { display:flex; align-items:center; gap:12px; }
+        .topbar-time { font-size:1rem; font-weight:300; color:var(--dim); font-variant-numeric:tabular-nums; }
+        .topbar-gpu { font-size:.7rem; color:var(--yellow); background:rgba(232,171,74,.1); padding:2px 8px; border-radius:8px; }
+
+        /* ═══ Main Layout ═══ */
+        .main {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            grid-template-rows: 1fr;
+            gap: 0;
+            overflow: hidden;
+        }
+
+        /* ═══ Left Panel — Dashboard Widgets ═══ */
+        .sidebar {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: 12px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .widget {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px;
+            position: relative;
+            overflow: hidden;
+        }
+        .widget::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
+        .widget-title { font-size:.7rem; color:var(--dim); text-transform:uppercase; letter-spacing:.8px; margin-bottom:8px; }
+
+        /* Weather widget */
+        .w-weather::before { background:linear-gradient(90deg,var(--accent),#6ab4ff); }
+        .w-weather-main { display:flex; justify-content:space-between; align-items:center; }
+        .w-weather-temp { font-size:2.2rem; font-weight:200; color:#fff; letter-spacing:-2px; }
+        .w-weather-icon { font-size:2rem; }
+        .w-weather-cond { font-size:.8rem; color:var(--dim); margin-top:2px; }
+        .w-weather-loc { font-size:.7rem; color:var(--accent); }
+        .w-weather-details { display:flex; gap:12px; margin-top:8px; padding-top:8px; border-top:1px solid var(--border); }
+        .w-weather-detail { font-size:.65rem; color:var(--dim); }
+        .w-weather-detail span { display:block; color:var(--text); font-size:.75rem; font-weight:500; }
+
+        /* Metrics widget */
+        .w-metrics::before { background:linear-gradient(90deg,var(--green),#4aff8a); }
+        .metric-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+        .metric-item { text-align:center; }
+        .metric-value { font-size:1.3rem; font-weight:600; color:var(--text); }
+        .metric-label { font-size:.6rem; color:var(--dim); text-transform:uppercase; }
+
+        /* Quick actions widget */
+        .w-actions::before { background:linear-gradient(90deg,#8a6aff,#aa8aff); }
+        .action-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+        .action-btn {
+            background: rgba(255,255,255,.05);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 8px;
+            color: var(--text);
+            font-size: .75rem;
+            cursor: pointer;
+            text-align: center;
+            min-height: var(--touch-min);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            transition: all .15s;
+        }
+        .action-btn:active { background:var(--accent); color:#000; transform:scale(.96); }
+        .action-btn .action-icon { font-size:1.3rem; }
+
+        /* Status widget */
+        .w-status::before { background:linear-gradient(90deg,var(--yellow),#ffd04a); }
+        .status-row { display:flex; justify-content:space-between; align-items:center; padding:3px 0; font-size:.75rem; }
+        .status-row .label { color:var(--dim); }
+        .status-row .value { color:var(--text); font-weight:500; }
+        .status-row .value.ok { color:var(--green); }
+        .status-row .value.warn { color:var(--yellow); }
+        .status-row .value.err { color:var(--red); }
+
+        /* ═══ Right Panel — Chat ═══ */
+        .chat-panel {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 16px;
+            scroll-behavior: smooth;
+        }
+        .bubble {
+            max-width: 85%;
+            padding: 10px 14px;
+            border-radius: 14px;
+            margin-bottom: 8px;
+            font-size: .9rem;
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .bubble.user {
+            background: var(--accent);
+            color: #000;
+            margin-left: auto;
+            border-bottom-right-radius: 4px;
+        }
+        .bubble.assistant {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-bottom-left-radius: 4px;
+        }
+        .bubble pre {
+            background: #0d1117;
+            border-radius: 8px;
+            padding: 8px;
+            overflow-x: auto;
+            font-size: .8rem;
+            margin: 6px 0;
+        }
+        .bubble code { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+        .typing-indicator { color:var(--dim); font-size:.8rem; padding:8px 0; }
+        .typing-indicator span { animation:blink 1.4s infinite both; }
+        .typing-indicator span:nth-child(2) { animation-delay:.2s; }
+        .typing-indicator span:nth-child(3) { animation-delay:.4s; }
+        @keyframes blink { 0%,80%,100%{opacity:0} 40%{opacity:1} }
+
+        /* ═══ Input Bar ═══ */
+        .input-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            flex-shrink: 0;
+        }
+        .input-field {
+            flex: 1;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            padding: 12px 18px;
+            color: var(--text);
+            font-size: .95rem;
+            outline: none;
+            min-height: var(--touch-min);
+        }
+        .input-field:focus { border-color:var(--accent); }
+        .input-field::placeholder { color:var(--dim); }
+        .send-btn, .mic-btn {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            flex-shrink: 0;
+            transition: all .15s;
+        }
+        .send-btn { background:var(--accent); color:#000; }
+        .send-btn:active { transform:scale(.9); }
+        .send-btn:disabled { background:var(--border); color:var(--dim); }
+        .mic-btn { background:rgba(255,255,255,.08); color:var(--dim); }
+        .mic-btn:active { background:var(--red); color:#fff; }
+        .mic-btn.recording { background:var(--red); color:#fff; animation:pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{box-shadow:0 0 0 0 rgba(255,74,74,.4)} 50%{box-shadow:0 0 0 12px rgba(255,74,74,0)} }
+
+        /* ═══ Smart Reply Chips ═══ */
+        .smart-replies {
+            display: flex;
+            gap: 6px;
+            padding: 0 12px 6px;
+            overflow-x: auto;
+            flex-shrink: 0;
+        }
+        .chip {
+            background: rgba(74,158,255,.1);
+            border: 1px solid var(--accent-dim);
+            border-radius: 20px;
+            padding: 8px 14px;
+            color: var(--accent);
+            font-size: .8rem;
+            white-space: nowrap;
+            cursor: pointer;
+            min-height: 36px;
+            display: flex;
+            align-items: center;
+        }
+        .chip:active { background:var(--accent); color:#000; }
+
+        /* ═══ Connection Modal ═══ */
+        .modal-overlay {
+            position: fixed; inset:0; background:rgba(0,0,0,.8);
+            display:flex; align-items:center; justify-content:center; z-index:100;
+        }
+        .modal {
+            background:var(--surface); border:1px solid var(--border);
+            border-radius:var(--radius); padding:24px; width:min(90vw,380px);
+            text-align:center;
+        }
+        .modal h2 { font-size:1.2rem; margin-bottom:16px; color:var(--accent); }
+        .modal input {
+            width:100%; padding:14px; background:var(--card); border:1px solid var(--border);
+            border-radius:12px; color:var(--text); font-size:1rem; margin-bottom:12px; outline:none;
+            min-height:var(--touch-min);
+        }
+        .modal input:focus { border-color:var(--accent); }
+        .modal button {
+            width:100%; padding:14px; background:var(--accent); border:none;
+            border-radius:12px; color:#000; font-size:1rem; font-weight:600; cursor:pointer;
+            min-height:var(--touch-min);
+        }
+        .modal button:active { opacity:.8; }
+        .modal .scan-status { font-size:.8rem; color:var(--dim); margin-top:8px; }
+        .hidden { display:none !important; }
+    </style>
+</head>
+<body>
+    <!-- Connection Modal -->
+    <div class="modal-overlay" id="connect-modal">
+        <div class="modal">
+            <h2>Connect to OmniAgent</h2>
+            <input id="server-url" type="text" placeholder="Server IP (e.g. 192.168.1.100:8000)" />
+            <button onclick="connectToServer()">Connect</button>
+            <button onclick="scanNetwork()" style="margin-top:8px;background:var(--card);color:var(--text);border:1px solid var(--border)">Scan Network</button>
+            <div class="scan-status" id="scan-status"></div>
+        </div>
+    </div>
+
+    <!-- Top Bar -->
+    <div class="topbar">
+        <div class="topbar-left">
+            <div class="status-dot" id="status-dot"></div>
+            <div class="topbar-logo">OmniAgent</div>
+            <div class="topbar-version" id="topbar-version">Hub</div>
+        </div>
+        <div class="topbar-right">
+            <div class="topbar-gpu" id="topbar-gpu">GPU --</div>
+            <div class="topbar-time" id="topbar-time">--:--</div>
+        </div>
+    </div>
+
+    <!-- Main Layout -->
+    <div class="main">
+        <!-- Left: Dashboard Widgets -->
+        <div class="sidebar">
+            <!-- Weather -->
+            <div class="widget w-weather" id="widget-weather">
+                <div class="widget-title">Weather</div>
+                <div class="w-weather-main">
+                    <div>
+                        <div class="w-weather-temp" id="w-temp">--</div>
+                        <div class="w-weather-cond" id="w-cond">Loading...</div>
+                    </div>
+                    <div class="w-weather-icon" id="w-icon">🌡️</div>
+                </div>
+                <div class="w-weather-loc" id="w-loc">--</div>
+                <div class="w-weather-details">
+                    <div class="w-weather-detail">Humidity<span id="w-humidity">--</span></div>
+                    <div class="w-weather-detail">Wind<span id="w-wind">--</span></div>
+                    <div class="w-weather-detail">Feels<span id="w-feels">--</span></div>
+                </div>
+            </div>
+
+            <!-- Metrics -->
+            <div class="widget w-metrics">
+                <div class="widget-title">Live Metrics</div>
+                <div class="metric-grid">
+                    <div class="metric-item"><div class="metric-value" id="m-tasks">0</div><div class="metric-label">Tasks</div></div>
+                    <div class="metric-item"><div class="metric-value" id="m-llm">0</div><div class="metric-label">LLM Calls</div></div>
+                    <div class="metric-item"><div class="metric-value" id="m-tok-in">0</div><div class="metric-label">Tokens In</div></div>
+                    <div class="metric-item"><div class="metric-value" id="m-tok-out">0</div><div class="metric-label">Tokens Out</div></div>
+                </div>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="widget w-actions">
+                <div class="widget-title">Quick Actions</div>
+                <div class="action-grid">
+                    <div class="action-btn" onclick="quickSend('What is the weather right now?')">
+                        <span class="action-icon">🌤️</span>Weather
+                    </div>
+                    <div class="action-btn" onclick="quickSend('What time is it?')">
+                        <span class="action-icon">🕐</span>Time
+                    </div>
+                    <div class="action-btn" onclick="quickSend('Show system status')">
+                        <span class="action-icon">📊</span>Status
+                    </div>
+                    <div class="action-btn" onclick="quickSend('Run the test suite')">
+                        <span class="action-icon">🧪</span>Tests
+                    </div>
+                    <div class="action-btn" onclick="quickSend('Show git log')">
+                        <span class="action-icon">📝</span>Git Log
+                    </div>
+                    <div class="action-btn" onclick="quickSend('What tasks are running?')">
+                        <span class="action-icon">⚡</span>Tasks
+                    </div>
+                </div>
+            </div>
+
+            <!-- Server Status -->
+            <div class="widget w-status">
+                <div class="widget-title">Server</div>
+                <div class="status-row"><span class="label">Ollama</span><span class="value" id="s-ollama">--</span></div>
+                <div class="status-row"><span class="label">BitNet</span><span class="value" id="s-bitnet">--</span></div>
+                <div class="status-row"><span class="label">GPU Workers</span><span class="value" id="s-workers">--</span></div>
+                <div class="status-row"><span class="label">Model</span><span class="value" id="s-model">--</span></div>
+            </div>
+        </div>
+
+        <!-- Right: Chat -->
+        <div class="chat-panel">
+            <div class="chat-messages" id="chat"></div>
+            <div class="smart-replies" id="smart-replies"></div>
+            <div class="input-bar">
+                <button class="mic-btn" id="mic-btn" onclick="toggleMic()">🎤</button>
+                <input class="input-field" id="input" type="text" placeholder="Ask OmniAgent..."
+                       onkeydown="if(event.key==='Enter')sendMessage()" />
+                <button class="send-btn" id="send-btn" onclick="sendMessage()">➤</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let BASE = '';
+        let sessionId = 'hub_' + Math.random().toString(36).slice(2, 10);
+        let isSending = false;
+        let metricsInterval = null;
+        let weatherInterval = null;
+
+        // ═══ Connection ═══
+        function connectToServer() {
+            let url = document.getElementById('server-url').value.trim();
+            if (!url) return;
+            if (!url.startsWith('http')) url = 'http://' + url;
+            BASE = url.replace(/\/$/, '');
+            document.getElementById('scan-status').textContent = 'Connecting...';
+            fetch(BASE + '/api/identify').then(r => r.json()).then(d => {
+                document.getElementById('connect-modal').classList.add('hidden');
+                document.getElementById('status-dot').classList.add('connected');
+                document.getElementById('topbar-version').textContent = 'v' + d.version;
+                localStorage.setItem('hub_server', BASE);
+                startPolling();
+                fetchWeather();
+            }).catch(e => {
+                document.getElementById('scan-status').textContent = 'Failed: ' + e.message;
+            });
+        }
+
+        function scanNetwork() {
+            document.getElementById('scan-status').textContent = 'Scanning LAN...';
+            // Try common local IPs
+            const base = '192.168.1.';
+            let found = false;
+            let checked = 0;
+            for (let i = 1; i <= 254; i++) {
+                const url = 'http://' + base + i + ':8000';
+                const ctrl = new AbortController();
+                setTimeout(() => ctrl.abort(), 2000);
+                fetch(url + '/api/identify', {signal: ctrl.signal}).then(r => r.json()).then(d => {
+                    if (!found && d.service === 'OmniAgent') {
+                        found = true;
+                        document.getElementById('server-url').value = base + i + ':8000';
+                        document.getElementById('scan-status').textContent = 'Found: ' + base + i + ':8000 (v' + d.version + ')';
+                    }
+                }).catch(() => {}).finally(() => {
+                    checked++;
+                    if (checked >= 254 && !found) {
+                        document.getElementById('scan-status').textContent = 'No server found on 192.168.1.x. Enter IP manually.';
+                    }
+                });
+            }
+        }
+
+        // Auto-connect on load
+        const saved = localStorage.getItem('hub_server');
+        if (saved) {
+            document.getElementById('server-url').value = saved.replace(/^https?:\/\//, '');
+            connectToServer();
+        }
+
+        // ═══ Clock ═══
+        setInterval(() => {
+            const now = new Date();
+            document.getElementById('topbar-time').textContent =
+                now.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        }, 1000);
+
+        // ═══ Metrics Polling ═══
+        function startPolling() {
+            if (metricsInterval) clearInterval(metricsInterval);
+            metricsInterval = setInterval(fetchMetrics, 3000);
+            fetchMetrics();
+            // Refresh weather every 15 min
+            if (weatherInterval) clearInterval(weatherInterval);
+            weatherInterval = setInterval(fetchWeather, 900000);
+        }
+
+        async function fetchMetrics() {
+            try {
+                const r = await fetch(BASE + '/api/metrics');
+                const d = await r.json();
+                document.getElementById('m-tasks').textContent = d.tasks_completed || 0;
+                document.getElementById('m-llm').textContent = d.total_llm_calls || 0;
+                document.getElementById('m-tok-in').textContent = formatK(d.tokens_in || 0);
+                document.getElementById('m-tok-out').textContent = formatK(d.tokens_out || 0);
+                if (d.gpu_temp) document.getElementById('topbar-gpu').textContent = 'GPU ' + d.gpu_temp;
+                // Server status
+                const s = await (await fetch(BASE + '/api/status')).json();
+                setStatus('s-ollama', s.ollama);
+                setStatus('s-bitnet', s.bitnet);
+                document.getElementById('s-workers').textContent = s.gpu_workers || 0;
+                document.getElementById('s-model').textContent = (s.models?.general || '--').split(':')[0];
+            } catch(_) {
+                document.getElementById('status-dot').classList.remove('connected');
+            }
+        }
+
+        function setStatus(id, val) {
+            const el = document.getElementById(id);
+            if (val === true) { el.textContent = 'Online'; el.className = 'value ok'; }
+            else if (val === false) { el.textContent = 'Offline'; el.className = 'value err'; }
+            else { el.textContent = String(val); el.className = 'value'; }
+        }
+
+        function formatK(n) { return n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n); }
+
+        // ═══ Weather Widget ═══
+        const condIcons = {
+            clear:'☀️',sunny:'☀️',fair:'☀️',partly:'⛅','partly cloudy':'⛅',
+            cloudy:'☁️',overcast:'☁️',rain:'🌧️','light rain':'🌦️',drizzle:'🌦️',
+            thunderstorm:'⛈️',snow:'❄️','light snow':'🌨️',fog:'🌫️',mist:'🌫️',wind:'💨',
+        };
+        function getWeatherIcon(cond) {
+            const c = (cond||'').toLowerCase();
+            for (const [k,v] of Object.entries(condIcons)) if (c.includes(k)) return v;
+            return '🌡️';
+        }
+
+        async function fetchWeather() {
+            try {
+                // Use the OmniAgent weather tool via MCP or direct
+                const r = await fetch(BASE + '/mcp', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',
+                        params:{name:'weather',arguments:{location:'auto'}}})
+                });
+                const d = await r.json();
+                const text = d.result?.content?.[0]?.text || '';
+                const jsonMatch = text.match(/RAW_JSON:\s*\n(\{[\s\S]*\})/);
+                if (jsonMatch) {
+                    const w = JSON.parse(jsonMatch[1]);
+                    const cur = w.current || {};
+                    document.getElementById('w-temp').textContent = cur.temperature_f || '--';
+                    document.getElementById('w-cond').textContent = cur.condition || '--';
+                    document.getElementById('w-icon').textContent = getWeatherIcon(cur.condition);
+                    document.getElementById('w-loc').textContent = '📍 ' + (cur.location || '--');
+                    document.getElementById('w-humidity').textContent = cur.humidity || '--';
+                    document.getElementById('w-wind').textContent = cur.wind || '--';
+                    document.getElementById('w-feels').textContent = cur.feels_like_f || '--';
+                }
+            } catch(_) {}
+        }
+
+        // ═══ Chat ═══
+        function addBubble(role, text) {
+            const chat = document.getElementById('chat');
+            const b = document.createElement('div');
+            b.className = 'bubble ' + role;
+            b.innerHTML = simpleMarkdown(text);
+            chat.appendChild(b);
+            chat.scrollTop = chat.scrollHeight;
+            return b;
+        }
+
+        function simpleMarkdown(text) {
+            // Basic markdown → HTML
+            let h = text
+                .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/\n/g, '<br>');
+            return h;
+        }
+
+        async function sendMessage() {
+            const input = document.getElementById('input');
+            const text = input.value.trim();
+            if (!text || isSending) return;
+            input.value = '';
+            addBubble('user', text);
+            document.getElementById('smart-replies').innerHTML = '';
+            isSending = true;
+            document.getElementById('send-btn').disabled = true;
+
+            // Show typing indicator
+            const typing = document.createElement('div');
+            typing.className = 'typing-indicator';
+            typing.innerHTML = '<span>●</span><span>●</span><span>●</span>';
+            document.getElementById('chat').appendChild(typing);
+
+            try {
+                // Stream response
+                const resp = await fetch(BASE + '/chat/stream', {
+                    method: 'POST',
+                    headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({message: text, session_id: sessionId}),
+                });
+                typing.remove();
+                const bubble = addBubble('assistant', '');
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let full = '';
+
+                while (true) {
+                    const {done, value} = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, {stream:true});
+                    for (const line of chunk.split('\n')) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const d = JSON.parse(line.slice(6));
+                            if (d.token) { full += d.token; bubble.innerHTML = simpleMarkdown(full); }
+                            if (d.done) { bubble.innerHTML = simpleMarkdown(full); showSmartReplies(full); }
+                        } catch(_) {}
+                    }
+                }
+                document.getElementById('chat').scrollTop = document.getElementById('chat').scrollHeight;
+            } catch(e) {
+                typing.remove();
+                addBubble('assistant', 'Connection error: ' + e.message);
+            }
+            isSending = false;
+            document.getElementById('send-btn').disabled = false;
+        }
+
+        function quickSend(text) {
+            document.getElementById('input').value = text;
+            sendMessage();
+        }
+
+        // ═══ Smart Replies ═══
+        function showSmartReplies(text) {
+            const lower = text.toLowerCase();
+            let suggestions = [];
+            if (lower.includes('error') || lower.includes('fail')) {
+                suggestions = ['Show full error', 'How do I fix this?', 'Try again'];
+            } else if (lower.includes('```')) {
+                suggestions = ['Explain this', 'Write tests', 'Run it'];
+            } else if (lower.includes('weather') || lower.includes('°')) {
+                suggestions = ['Tomorrow?', 'Hourly forecast', 'Thanks!'];
+            } else {
+                suggestions = ['Tell me more', 'What else?', 'Thanks!'];
+            }
+            const container = document.getElementById('smart-replies');
+            container.innerHTML = suggestions.map(s =>
+                `<div class="chip" onclick="quickSend('${s.replace(/'/g,"\\'")}')">${s}</div>`
+            ).join('');
+        }
+
+        // ═══ Voice (Mic) ═══
+        let mediaRecorder = null;
+        let audioChunks = [];
+
+        function toggleMic() {
+            const btn = document.getElementById('mic-btn');
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                btn.classList.remove('recording');
+                btn.textContent = '🎤';
+                return;
+            }
+            navigator.mediaDevices.getUserMedia({audio:true}).then(stream => {
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+                mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+                mediaRecorder.onstop = async () => {
+                    stream.getTracks().forEach(t => t.stop());
+                    const blob = new Blob(audioChunks, {type:'audio/webm'});
+                    const form = new FormData();
+                    form.append('audio', blob, 'recording.webm');
+                    try {
+                        const r = await fetch(BASE + '/api/stt', {method:'POST', body:form});
+                        const d = await r.json();
+                        if (d.text) { document.getElementById('input').value = d.text; sendMessage(); }
+                    } catch(_) {}
+                };
+                mediaRecorder.start();
+                btn.classList.add('recording');
+                btn.textContent = '⏹️';
+            }).catch(() => {});
+        }
+    </script>
+</body>
+</html>

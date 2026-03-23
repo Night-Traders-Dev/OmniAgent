@@ -239,6 +239,7 @@ OmniAgent/
 │   └── index.html         # WebUI (single file, 2K+ lines)
 ├── android/               # Android app (Kotlin + Jetpack Compose)
 ├── desktop/               # Linux desktop app (Tauri + Rust)
+├── smarthub/              # OrangePi RV2 Smart Hub (touch kiosk UI)
 ├── vscode-extension/      # VS Code extension scaffold
 ├── tests/                 # 396 tests (all passing)
 ├── docker-compose.yml     # One-command deployment

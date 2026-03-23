@@ -2362,6 +2362,26 @@ async def api_mcp_all_tools():
     return JSONResponse({"tools": get_all_mcp_tools()})
 
 
+# --- Smart Hub ---
+
+@app.get("/api/hub/discover")
+async def hub_discover():
+    """Endpoint for Smart Hub devices to discover and identify this server."""
+    return JSONResponse({
+        "service": "OmniAgent",
+        "version": VERSION,
+        "hub_compatible": True,
+        "capabilities": {
+            "chat": True,
+            "weather": True,
+            "voice_stt": True,
+            "voice_tts": True,
+            "mcp": True,
+            "tools": len(TOOL_REGISTRY),
+            "agents": list(SPECIALIST_REGISTRY.keys()),
+        },
+    })
+
 # --- Upload management ---
 
 class DeleteUploadReq(BaseModel):
