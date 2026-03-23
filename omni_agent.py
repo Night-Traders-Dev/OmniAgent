@@ -431,6 +431,23 @@ def main():
     except Exception as e:
         logger.debug(f"[Scheduler] Init error: {e}")
 
+    # Start metrics recording for dashboard
+    try:
+        from src.experiments import record_metrics_snapshot
+        import threading
+        def _metrics_loop():
+            import time
+            while True:
+                try:
+                    record_metrics_snapshot()
+                except Exception:
+                    pass
+                time.sleep(60)
+        threading.Thread(target=_metrics_loop, daemon=True).start()
+        logger.info("[Dashboard] Metrics recording started (1/min)")
+    except Exception as e:
+        logger.debug(f"[Dashboard] Init error: {e}")
+
     # Start services
     start_bitnet()
 

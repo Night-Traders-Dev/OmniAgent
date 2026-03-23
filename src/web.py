@@ -1775,6 +1775,80 @@ async def test_notifications():
     return JSONResponse({"ok": True})
 
 
+# --- Model A/B Testing ---
+
+class ABTestReq(BaseModel):
+    prompt: str
+    model_a: str
+    model_b: str
+    context: str = ""
+
+@app.post("/api/models/compare")
+async def api_compare_models(req: ABTestReq):
+    from src.experiments import compare_models
+    result = await compare_models(req.prompt, req.model_a, req.model_b, req.context)
+    return JSONResponse(result)
+
+
+# --- Fine-Tuning Data ---
+
+class FeedbackReq(BaseModel):
+    user_message: str
+    good_response: str
+    bad_response: str = ""
+    correction: str = ""
+
+@app.post("/api/finetune/collect")
+async def api_collect_training(req: FeedbackReq):
+    from src.experiments import collect_training_sample
+    collect_training_sample(req.user_message, req.good_response, req.bad_response, req.correction)
+    return JSONResponse({"ok": True})
+
+@app.get("/api/finetune/stats")
+async def api_finetune_stats():
+    from src.experiments import get_training_stats
+    return JSONResponse(get_training_stats())
+
+@app.get("/api/finetune/export")
+async def api_finetune_export(format: str = "alpaca"):
+    from src.experiments import export_training_data
+    return JSONResponse(json.loads(export_training_data(format)))
+
+
+# --- Metrics Dashboard ---
+
+@app.get("/api/dashboard")
+async def api_dashboard(hours: int = 1):
+    from src.experiments import get_metrics_history
+    return JSONResponse({"history": get_metrics_history(hours)})
+
+
+# --- Plugin Marketplace ---
+
+@app.get("/api/plugins/marketplace")
+async def api_plugin_marketplace():
+    from src.experiments import fetch_plugin_registry
+    return JSONResponse({"plugins": fetch_plugin_registry()})
+
+class PluginInstallReq(BaseModel):
+    url: str
+    name: str
+
+@app.post("/api/plugins/install")
+async def api_install_plugin(req: PluginInstallReq):
+    from src.experiments import install_plugin
+    result = install_plugin(req.url, req.name)
+    return JSONResponse({"result": result})
+
+
+# --- Conversation Tree ---
+
+@app.get("/api/chat/tree/{session_id}")
+async def api_conversation_tree(session_id: str):
+    from src.experiments import get_conversation_tree
+    return JSONResponse(get_conversation_tree(session_id))
+
+
 # --- Reasoning / Thinking History ---
 
 @app.get("/api/reasoning/history")

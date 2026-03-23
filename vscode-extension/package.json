@@ -1,0 +1,34 @@
+{
+  "name": "omniagent",
+  "displayName": "OmniAgent",
+  "description": "AI coding assistant powered by your local OmniAgent server",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["AI", "Chat"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "omniagent.ask", "title": "OmniAgent: Ask" },
+      { "command": "omniagent.explain", "title": "OmniAgent: Explain Selection" },
+      { "command": "omniagent.fix", "title": "OmniAgent: Fix Selection" },
+      { "command": "omniagent.review", "title": "OmniAgent: Review File" }
+    ],
+    "configuration": {
+      "title": "OmniAgent",
+      "properties": {
+        "omniagent.serverUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "OmniAgent server URL"
+        }
+      }
+    },
+    "menus": {
+      "editor/context": [
+        { "command": "omniagent.explain", "group": "omniagent" },
+        { "command": "omniagent.fix", "group": "omniagent" }
+      ]
+    }
+  }
+}

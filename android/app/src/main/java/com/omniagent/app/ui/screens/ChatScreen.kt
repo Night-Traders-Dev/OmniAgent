@@ -152,7 +152,7 @@ fun TopBar(state: ChatUiState, onMenuClick: () -> Unit, onHistoryClick: () -> Un
                 Icon(Icons.Filled.Forum, contentDescription = "Chat History", tint = TextPrimary)
             }
             Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
-                Text("OmniAgent v8.2", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                Text("OmniAgent v8.3", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 Text(state.status, fontSize = 11.sp, color = TextDim, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {

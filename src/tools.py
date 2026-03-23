@@ -983,6 +983,22 @@ def execute_tool(tool_name: str, args: dict) -> str:
         return "DONE"
     fn_ref = entry["fn"]
     fn = fn_ref if callable(fn_ref) else globals()[fn_ref]
+
+    # Dedup cache — prevent parallel agents from running identical read-only commands
+    _READ_ONLY_TOOLS = {"shell", "read", "glob", "grep", "tree", "list_dir", "file_info",
+                        "analyze_file", "project_deps", "find_symbol", "git_status", "git_diff",
+                        "git_log", "web", "fetch_url", "weather", "process_list", "network_info",
+                        "env_get", "deep_research", "multi_search", "docker"}
+    if tool_name in _READ_ONLY_TOOLS:
+        cache_key = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+        try:
+            from src.upgrades import web_cache
+            cached = web_cache.get(f"tool:{cache_key}")
+            if cached is not None:
+                return cached
+        except Exception:
+            pass
+
     # Enforce per-tool timeout
     timeout = TOOL_TIMEOUTS.get(tool_name, 30)
     # Audit log for sensitive tools
@@ -999,7 +1015,16 @@ def execute_tool(tool_name: str, args: dict) -> str:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(fn, **args)
             result = str(future.result(timeout=timeout))
-        return compress_tool_result(result)
+        compressed = compress_tool_result(result)
+        # Cache read-only tool results (60s TTL) to prevent duplicate parallel calls
+        if tool_name in _READ_ONLY_TOOLS:
+            try:
+                from src.upgrades import web_cache
+                cache_key = f"{tool_name}:{json.dumps(args, sort_keys=True)}"
+                web_cache.set(f"tool:{cache_key}", compressed)
+            except Exception:
+                pass
+        return compressed
     except TypeError as e:
         # Provide helpful feedback: show expected args from registry
         expected = entry.get("args", "")

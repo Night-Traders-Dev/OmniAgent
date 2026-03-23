@@ -538,6 +538,36 @@ class Orchestrator:
         full_context = f"{conv_context}\n\n{context}".strip() if conv_context else context
         resolved_input = self._resolve_references(user_input)
 
+        # Inject RAG context
+        try:
+            from src.reasoning import retrieve_context
+            rag_context = retrieve_context(resolved_input)
+            if rag_context:
+                full_context = f"{rag_context}\n\n{full_context}"
+        except Exception:
+            pass
+
+        # Check for reasoning chain (complex tasks)
+        try:
+            from src.reasoning import should_use_reasoning_chain, structured_reasoning_chain
+            if should_use_reasoning_chain(resolved_input):
+                self._log("Orchestrator: Complex task — streaming reasoning chain")
+                state.total_steps = 6
+                chain_result = await structured_reasoning_chain(resolved_input, full_context, conv_messages)
+                final_output = chain_result.get('final_output', '')
+                if final_output:
+                    # Stream the final output token-by-token
+                    for token in final_output.split(' '):
+                        yield token + ' '
+                    state.chat_history.append({"role": "user", "content": user_input})
+                    state.chat_history.append({"role": "assistant", "content": final_output})
+                    state.save_session()
+                    state.current_status = "Finished"
+                    state.finish_task()
+                    return
+        except Exception as e:
+            self._log(f"Orchestrator: Reasoning chain failed ({e})")
+
         fast_agent = self._detect_simple_query(resolved_input)
         if fast_agent:
             self._log(f"Orchestrator: Fast-routing to {fast_agent}")

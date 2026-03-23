@@ -1,6 +1,27 @@
 # OmniAgent Changelog
 
-## v8.2.0 — 2026-03-23 (Current)
+## v8.3.0 — 2026-03-23 (Current)
+
+### AI Intelligence
+- **Streaming reasoning chain** — Complex tasks now stream phase-by-phase through the chat. RAG context injected into streaming path
+- **FAISS vector search** — Upgraded from trigram matching to FAISS IndexFlatIP for fast nearest-neighbor semantic code search
+- **Model A/B testing** — `POST /api/models/compare` runs same prompt through two models side-by-side with speed/quality metrics
+- **Fine-tuning data collection** — Collect training samples from user feedback. Export as Alpaca or ShareGPT format for LoRA training
+
+### Platform
+- **VS Code extension** — Scaffold with Ask, Explain Selection, Fix Selection, Review File commands. Right-click context menu integration
+- **Plugin marketplace** — Browse and install community plugins from a registry URL. `GET /api/plugins/marketplace`, `POST /api/plugins/install`
+- **Metrics dashboard** — Per-minute GPU temp, VRAM, tasks, LLM calls recorded. `GET /api/dashboard?hours=1` for chart data
+- **Conversation fork tree** — `GET /api/chat/tree/{session_id}` returns message tree structure for visualization
+
+### Reliability
+- **147 API endpoints** — up from 140
+- **47 tools** — added `sandbox_run` for Docker-containerized code execution
+- **FAISS index** — built automatically after RAG indexing for sub-millisecond code search
+
+---
+
+## v8.2.0 — 2026-03-23
 
 ### Platform Features
 - **Auto model selection** — Benchmarks installed Ollama models on demand (speed, quality, latency). `GET /api/models/benchmark`, `GET /api/models/best?role=coding`

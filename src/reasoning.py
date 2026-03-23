@@ -53,18 +53,19 @@ def get_large_model_client():
 
 _embedding_cache: dict[str, list[float]] = {}
 _file_index: dict[str, dict] = {}  # path → {hash, summary, embedding}
-_MAX_INDEX_FILES = 5000  # Cap to prevent memory issues on huge repos
+_faiss_index = None  # FAISS index for fast vector search
+_faiss_paths: list[str] = []  # Ordered paths matching FAISS index positions
+_MAX_INDEX_FILES = 5000
+_EMBED_DIM = 256
 
 def _simple_embed(text: str) -> list[float]:
-    """Simple TF-IDF-like embedding for semantic search (no external model needed).
-    Uses character trigrams hashed to a fixed-size vector."""
-    vec = [0.0] * 256
+    """TF-IDF-like embedding using character trigrams → fixed 256-dim vector."""
+    vec = [0.0] * _EMBED_DIM
     text = text.lower()
     for i in range(len(text) - 2):
         trigram = text[i:i+3]
-        idx = hash(trigram) % 256
+        idx = hash(trigram) % _EMBED_DIM
         vec[idx] += 1.0
-    # Normalize
     norm = sum(v*v for v in vec) ** 0.5
     if norm > 0:
         vec = [v / norm for v in vec]
@@ -72,6 +73,24 @@ def _simple_embed(text: str) -> list[float]:
 
 def _cosine_sim(a: list[float], b: list[float]) -> float:
     return sum(x*y for x, y in zip(a, b))
+
+def _build_faiss_index():
+    """Build a FAISS index from the file index for fast nearest-neighbor search."""
+    global _faiss_index, _faiss_paths
+    try:
+        import faiss
+        import numpy as np
+        if not _file_index:
+            return
+        paths = list(_file_index.keys())
+        embeddings = [_file_index[p]['embedding'] for p in paths]
+        matrix = np.array(embeddings, dtype=np.float32)
+        index = faiss.IndexFlatIP(matrix.shape[1])  # Inner product (cosine on normalized vecs)
+        index.add(matrix)
+        _faiss_index = index
+        _faiss_paths = paths
+    except ImportError:
+        pass  # Fall back to brute-force cosine
 
 def _summarize_file(path: str) -> str:
     """Extract function/class signatures as a compact summary."""
@@ -125,21 +144,39 @@ def index_codebase(root: str = ".") -> int:
             count += 1
         except Exception:
             continue
+    # Build FAISS index for fast retrieval
+    _build_faiss_index()
     return count
 
 def retrieve_context(query: str, max_files: int = 5, max_chars: int = 8000) -> str:
-    """Retrieve relevant files/functions for a query using semantic search."""
+    """Retrieve relevant files/functions for a query using FAISS vector search (or cosine fallback)."""
     if not _file_index:
         index_codebase()
     if not _file_index:
         return ""
 
     query_emb = _simple_embed(query)
+
+    # Try FAISS first (much faster for large codebases)
     scored = []
-    for path, info in _file_index.items():
-        sim = _cosine_sim(query_emb, info['embedding'])
-        scored.append((sim, path, info))
-    scored.sort(reverse=True)
+    if _faiss_index is not None and _faiss_paths:
+        try:
+            import numpy as np
+            q = np.array([query_emb], dtype=np.float32)
+            distances, indices = _faiss_index.search(q, min(max_files * 2, len(_faiss_paths)))
+            for dist, idx in zip(distances[0], indices[0]):
+                if idx >= 0 and idx < len(_faiss_paths):
+                    path = _faiss_paths[idx]
+                    scored.append((float(dist), path, _file_index[path]))
+        except Exception:
+            scored = []
+
+    # Fallback to brute-force cosine
+    if not scored:
+        for path, info in _file_index.items():
+            sim = _cosine_sim(query_emb, info['embedding'])
+            scored.append((sim, path, info))
+        scored.sort(reverse=True)
 
     context_parts = []
     total = 0
