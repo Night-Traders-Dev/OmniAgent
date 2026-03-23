@@ -1,0 +1,137 @@
+# ============================================================
+# OmniAgent v8.1 — .gitignore
+# ============================================================
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+.venv/
+venv/
+env/
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Runtime / Generated ─────────────────────────────────────
+# Database (contains user data, encrypted messages)
+omni_data.db
+omni_data.db-wal
+omni_data.db-shm
+
+# Session state
+omni_session.json
+
+# Encryption key (NEVER commit — unique per installation)
+.omni_key
+
+# Tunnel URL (ephemeral)
+.tunnel_url
+
+# Agent working files
+plan.md
+memory.md
+
+# ── Uploads (user-generated content) ────────────────────────
+uploads/
+worker_outputs/
+
+# ── Logs ─────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Secrets / Environment ───────────────────────────────────
+.env
+.env.local
+.env.production
+.env.*.local
+
+# ── BitNet (1.2GB model + compiled binary) ──────────────────
+bitnet/model/
+bitnet/llama-server
+bitnet/llama-cli
+# Keep bitnet/start.sh (small script)
+
+# ── Piper Voice Models (downloaded separately) ──────────────
+*.onnx
+# Keep .onnx.json config files (tiny)
+!src/**/*.onnx
+
+# ── Android ─────────────────────────────────────────────────
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/captures/
+android/.externalNativeBuild/
+android/.cxx/
+
+# Android signing
+*.jks
+*.keystore
+android/app/*.apk
+
+# ── Gradle ──────────────────────────────────────────────────
+.gradle/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+# ── IDE / Editor ─────────────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ── Docker ───────────────────────────────────────────────────
+docker/data/
+
+# ── Node (if any frontend tooling added later) ──────────────
+node_modules/
+package-lock.json
+yarn.lock
+
+# ── ML Models (too large for git) ───────────────────────────
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.h5
+*.tflite
+# Exception: keep Android assets if bundled
+!android/app/src/main/assets/**
+
+# ── Misc ─────────────────────────────────────────────────────
+*.bak
+*.tmp
+*.temp
+*.orig
+*.rej
+.cache/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml

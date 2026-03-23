@@ -1,0 +1,30 @@
+version: '3.8'
+services:
+  omniagent:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./uploads:/app/uploads
+      - omni_data:/app/data
+      - ~/.omniagent:/root/.omniagent
+    environment:
+      - OLLAMA_HOST=ollama
+    depends_on:
+      - ollama
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+volumes:
+  omni_data:
+  ollama_data:
