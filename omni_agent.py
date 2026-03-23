@@ -73,7 +73,7 @@ def _generate_pairing_code() -> str:
     Same machine + user always gets the same code, so it's memorable."""
     import platform
     identity = f"{platform.node()}-{os.environ.get('USER', 'omni')}"
-    h = hashlib.sha256(identity.encode()).hexdigest()[:6]
+    h = hashlib.sha256(identity.encode()).hexdigest()[:12]
     return h
 
 # Allow override via env var
@@ -215,8 +215,19 @@ def start_bitnet():
                 return
     except Exception:
         pass
-    config.BITNET_ENABLED = True  # Assume it'll come up
-    logger.info(f"[BitNet] Server launched (PID {BITNET_PROCESS.pid}), waiting for ready")
+    # Don't assume success — check again after a longer wait
+    import time as _t
+    _t.sleep(3)
+    try:
+        import urllib.request as _ur2
+        with _ur2.urlopen(f"http://localhost:{port}/v1/models", timeout=3) as resp2:
+            if resp2.status == 200:
+                config.BITNET_ENABLED = True
+                logger.info(f"[BitNet] Server ready (PID {BITNET_PROCESS.pid})")
+                return
+    except Exception:
+        pass
+    logger.warning(f"[BitNet] Server launched (PID {BITNET_PROCESS.pid}) but not responding — disabled")
 
 
 # ============================================================
@@ -302,9 +313,11 @@ def start_tunnel():
                     print("  Enter the pairing code in the Android app")
                     print("  to connect from anywhere (no LAN needed).")
                     print()
-                    # Save URL to file for other tools to read
+                    # Save URL to file for other tools to read (restricted perms)
                     try:
-                        (Path(__file__).parent / ".tunnel_url").write_text(url)
+                        tunnel_path = Path(__file__).parent / ".tunnel_url"
+                        tunnel_path.write_text(url)
+                        tunnel_path.chmod(0o600)
                     except Exception:
                         pass
                     # Publish to ntfy.sh for remote discovery

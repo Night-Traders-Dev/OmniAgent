@@ -32,7 +32,9 @@ _FERNET = None  # Initialized when secret is set
 
 def _derive_fernet_key(secret: str) -> bytes:
     """Derive a Fernet key from the shared secret using HKDF-like derivation."""
-    dk = hashlib.pbkdf2_hmac('sha256', secret.encode(), b'omniagent-gpu-e2e', 100_000)
+    # Per-secret salt (derived from the secret itself) + 600k iterations (2024 standard)
+    salt = hashlib.sha256(b'omniagent-gpu-e2e-' + secret.encode()).digest()
+    dk = hashlib.pbkdf2_hmac('sha256', secret.encode(), salt, 600_000)
     return base64.urlsafe_b64encode(dk)
 
 def _get_fernet():

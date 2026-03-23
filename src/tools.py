@@ -442,7 +442,14 @@ class _TextExtractor(HTMLParser):
         return "\n".join(self._text)
 
 
-SSRF_BLOCKED_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"}
+SSRF_BLOCKED_HOSTS = {
+    "localhost", "127.0.0.1", "0.0.0.0", "::1", "127.1",
+    "metadata.google.internal",         # GCP metadata
+    "169.254.169.254",                  # AWS/Azure/GCP metadata
+    "169.254.170.2",                    # AWS ECS task metadata
+    "fd00:ec2::254",                    # AWS IPv6 metadata
+    "metadata.internal",                # Generic cloud metadata
+}
 
 def _is_ssrf_target(url: str) -> str | None:
     """Check if a URL targets internal/metadata services. Returns reason if blocked."""

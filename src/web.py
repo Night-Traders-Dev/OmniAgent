@@ -36,8 +36,8 @@ async def lifespan(application):
 
 app = FastAPI(
     title="OmniAgent",
-    version="8.2.0",
-    description="Autonomous AI Agent Framework — Local LLM orchestration with 46 tools, 7 agents, multi-phase task execution",
+    version=VERSION,
+    description=f"Autonomous AI Agent Framework — Local LLM orchestration with {len(TOOL_REGISTRY)} tools, 7 agents, multi-phase task execution",
     lifespan=lifespan,
     docs_url="/docs",
     redoc_url="/redoc",
@@ -774,6 +774,7 @@ SSE_HEADERS = {
 }
 
 @app.get("/stream")
+@limiter.limit("10/minute")
 async def stream(request: Request, session_id: str = "default"):
     """SSE stream scoped to a specific session. Works over tunnels with anti-buffering."""
     sess = state.get_session(session_id)

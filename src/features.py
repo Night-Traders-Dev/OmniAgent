@@ -29,16 +29,18 @@ def search_all_conversations(user_id: int, query: str, limit: int = 20) -> list[
     """Full-text search across ALL sessions for a user."""
     from src.persistence import get_db, decrypt
     conn = get_db()
-    # Search encrypted messages — we have to decrypt and search
-    # For performance, search the last 1000 messages
-    rows = conn.execute("""
-        SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title
-        FROM chat_messages m
-        JOIN sessions s ON s.id = m.session_id
-        WHERE s.user_id = ? OR s.id IN (SELECT session_id FROM session_collaborators WHERE user_id = ?)
-        ORDER BY m.id DESC LIMIT 1000
-    """, (user_id, user_id)).fetchall()
-    conn.close()
+    try:
+        # Search encrypted messages — we have to decrypt and search
+        # For performance, search the last 1000 messages
+        rows = conn.execute("""
+            SELECT m.id, m.session_id, m.role, m.content, m.created_at, s.title
+            FROM chat_messages m
+            JOIN sessions s ON s.id = m.session_id
+            WHERE s.user_id = ? OR s.id IN (SELECT session_id FROM session_collaborators WHERE user_id = ?)
+            ORDER BY m.id DESC LIMIT 1000
+        """, (user_id, user_id)).fetchall()
+    finally:
+        conn.close()
 
     query_lower = query.lower()
     results = []
