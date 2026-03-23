@@ -117,6 +117,8 @@ if not _check_and_install_deps():
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [GPU-Worker] %(message)s")
 log = logging.getLogger("gpu_worker")
 
+
+
 # ── Config ───────────────────────────────────────────────────
 WORKER_PORT = int(os.environ.get("WORKER_PORT", "8100"))
 BROADCAST_PORT = 5199  # UDP broadcast port for discovery
