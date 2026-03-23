@@ -36,6 +36,7 @@
 #define MAX_URL_LEN 1024
 #define POLL_INTERVAL_MS 5000
 #define WEATHER_INTERVAL_MS 300000 /* 5 min */
+#define TAB_BAR_H 36
 
 /* ═══ Colors (warm, homey palette with transparency for animated bg) ═══ */
 typedef struct { Uint8 r, g, b, a; } Color;
@@ -520,9 +521,40 @@ static void parse_weather_json(const char *raw_json) {
     }
 }
 
+/* Unescape JSON string in-place: \n→newline, \"→quote, \\→backslash, \uXXXX→char */
+static void json_unescape(char *s) {
+    char *r = s, *w = s;
+    while (*r) {
+        if (*r == '\\' && *(r+1)) {
+            r++;
+            switch (*r) {
+                case 'n': *w++ = '\n'; r++; break;
+                case 't': *w++ = '\t'; r++; break;
+                case '"': *w++ = '"';  r++; break;
+                case '\\': *w++ = '\\'; r++; break;
+                case 'u': {
+                    /* \uXXXX — decode to UTF-8 (simplified: just skip for now) */
+                    unsigned int cp = 0;
+                    if (r[1] && r[2] && r[3] && r[4]) {
+                        sscanf(r+1, "%4x", &cp);
+                        r += 5;
+                        if (cp < 0x80) { *w++ = (char)cp; }
+                        else if (cp < 0x800) { *w++ = (char)(0xC0 | (cp >> 6)); *w++ = (char)(0x80 | (cp & 0x3F)); }
+                        else { *w++ = (char)(0xE0 | (cp >> 12)); *w++ = (char)(0x80 | ((cp >> 6) & 0x3F)); *w++ = (char)(0x80 | (cp & 0x3F)); }
+                    } else { *w++ = '?'; r++; }
+                    break;
+                }
+                default: *w++ = *r++; break;
+            }
+        } else {
+            *w++ = *r++;
+        }
+    }
+    *w = '\0';
+}
+
 static void *weather_thread_fn(void *arg) {
     (void)arg;
-    /* Ensure we have a location */
     if (!detected_city[0]) detect_location();
 
     const char *city = detected_city[0] ? detected_city : "auto";
@@ -535,6 +567,9 @@ static void *weather_thread_fn(void *arg) {
     snprintf(url, sizeof(url), "%s/mcp", server_url);
     char *resp = http_post(url, body);
     if (resp) {
+        /* The response is a JSON-RPC wrapper with escaped text inside.
+           Unescape it so RAW_JSON parsing works. */
+        json_unescape(resp);
         const char *raw = strstr(resp, "RAW_JSON:");
         if (raw) parse_weather_json(raw);
         free(resp);
@@ -1084,7 +1119,38 @@ static void draw_status_widget(int x, int y, int w) {
     draw_metric_row(mx, row, mw, "Version", ver, COL_DIM);
 }
 
+/* Clipped text — renders text but clips to max pixel width */
+static void draw_text_clipped(TTF_Font *f, const char *text, int x, int y, int max_w, Color c) {
+    if (!text || !text[0] || max_w <= 0) return;
+    /* Measure full text */
+    int tw = 0;
+    TTF_SizeUTF8(f, text, &tw, NULL);
+    if (tw <= max_w) {
+        draw_text(f, text, x, y, c);
+        return;
+    }
+    /* Truncate: binary search for how many chars fit */
+    char buf[512];
+    int len = (int)strlen(text);
+    if (len > (int)sizeof(buf) - 4) len = (int)sizeof(buf) - 4;
+    int lo = 1, hi = len;
+    while (lo < hi) {
+        int mid = (lo + hi + 1) / 2;
+        snprintf(buf, sizeof(buf), "%.*s...", mid, text);
+        TTF_SizeUTF8(f, buf, &tw, NULL);
+        if (tw <= max_w) lo = mid; else hi = mid - 1;
+    }
+    snprintf(buf, sizeof(buf), "%.*s...", lo, text);
+    draw_text(f, buf, x, y, c);
+}
+
 static void draw_news_panel(int x, int y, int w) {
+    /* Set clip rect to prevent bleeding */
+    SDL_Rect clip = {0, TOPBAR_H + TAB_BAR_H, SIDEBAR_W, screen_h - TOPBAR_H - TAB_BAR_H};
+    SDL_RenderSetClipRect(renderer, &clip);
+
+    int max_text_w = w - 16;
+
     /* Category tabs */
     const char *cats[] = {"Top", "Local", "National", "Global", NULL};
     const char *cat_ids[] = {"top", "local", "national", "global"};
@@ -1094,55 +1160,60 @@ static void draw_news_panel(int x, int y, int w) {
         Color bg = active ? COL_ACCENT : COL_CARD;
         Color fg = active ? (Color){10,15,25,255} : COL_DIM;
         int tw = 0; TTF_SizeUTF8(font_small, cats[i], &tw, NULL);
-        draw_rounded_rect(cx, y, tw + 16, 24, 8, bg);
-        draw_text(font_small, cats[i], cx + 8, y + 5, fg);
-        cx += tw + 22;
+        int chip_w = tw + 14;
+        draw_rounded_rect(cx, y, chip_w, 22, 8, bg);
+        draw_text(font_small, cats[i], cx + 7, y + 4, fg);
+        cx += chip_w + 4;
     }
-    y += 32;
+    y += 28;
 
     /* Articles */
     for (int i = 0; i < news_count && y < screen_h - 20; i++) {
-        draw_rounded_rect(x, y, w, 54, 6, COL_CARD);
+        draw_rounded_rect(x, y, w, 50, 6, COL_CARD);
         /* Source badge */
         if (news_articles[i].source[0]) {
-            draw_text(font_small, news_articles[i].source, x + 8, y + 4, COL_ACCENT);
+            draw_text_clipped(font_small, news_articles[i].source, x + 8, y + 4, max_text_w, COL_ACCENT);
         }
-        /* Title — truncated */
-        char title[100];
-        snprintf(title, sizeof(title), "%.90s", news_articles[i].title);
-        draw_text(font_small, title, x + 8, y + 20, COL_TEXT);
+        /* Title */
+        draw_text_clipped(font_small, news_articles[i].title, x + 8, y + 18, max_text_w, COL_TEXT);
         /* Snippet */
-        char snip[80];
-        snprintf(snip, sizeof(snip), "%.70s", news_articles[i].body);
-        draw_text(font_small, snip, x + 8, y + 36, COL_DIM);
-        y += 60;
+        draw_text_clipped(font_small, news_articles[i].body, x + 8, y + 34, max_text_w, COL_DIM);
+        y += 56;
     }
     if (news_count == 0) {
-        draw_text(font_regular, "Loading news...", x + 8, y, COL_DIM);
+        const char *msg = news_fetching ? "Loading news..." : "No articles";
+        draw_text(font_regular, msg, x + 8, y, COL_DIM);
     }
+    SDL_RenderSetClipRect(renderer, NULL);
 }
 
 static void draw_markets_panel(int x, int y, int w) {
-    draw_rounded_rect(x, y, w, 80, 8, COL_CARD);
+    SDL_Rect clip = {0, TOPBAR_H + TAB_BAR_H, SIDEBAR_W, screen_h - TOPBAR_H - TAB_BAR_H};
+    SDL_RenderSetClipRect(renderer, &clip);
+
+    int max_text_w = w - 24;
+    draw_rounded_rect(x, y, w, 100, 8, COL_CARD);
     fill_rect(x, y, w, 2, COL_GREEN);
     draw_text(font_small, "MARKETS", x + 12, y + 8, COL_DIM);
+
     if (market_summary[0]) {
         /* Split summary by semicolons and display each */
         char buf[1024];
         snprintf(buf, sizeof(buf), "%s", market_summary);
         int ly = y + 28;
-        char *line = strtok(buf, ";");
-        while (line && ly < y + 120) {
+        char *saveptr = NULL;
+        char *line = strtok_r(buf, ";", &saveptr);
+        while (line && ly < y + 92) {
             while (*line == ' ') line++;
-            char trunc[80];
-            snprintf(trunc, sizeof(trunc), "%.70s", line);
-            draw_text(font_small, trunc, x + 12, ly, COL_TEXT);
+            draw_text_clipped(font_small, line, x + 12, ly, max_text_w, COL_TEXT);
             ly += 16;
-            line = strtok(NULL, ";");
+            line = strtok_r(NULL, ";", &saveptr);
         }
     } else {
-        draw_text(font_regular, "Loading...", x + 12, y + 30, COL_DIM);
+        const char *msg = markets_fetching ? "Loading markets..." : "No data";
+        draw_text(font_regular, msg, x + 12, y + 35, COL_DIM);
     }
+    SDL_RenderSetClipRect(renderer, NULL);
 }
 
 static void draw_settings_panel(int x, int y, int w) {
@@ -1176,7 +1247,6 @@ static void draw_settings_panel(int x, int y, int w) {
     draw_metric_row(x + 8, y, w - 16, "LLM Calls", llm, COL_TEXT); y += rh;
 }
 
-#define TAB_BAR_H 36
 static void draw_sidebar(void) {
     fill_rect(0, TOPBAR_H, SIDEBAR_W, screen_h - TOPBAR_H, COL_SURFACE);
     fill_rect(SIDEBAR_W - 1, TOPBAR_H, 1, screen_h - TOPBAR_H, COL_BORDER);
@@ -1215,8 +1285,6 @@ static void draw_sidebar(void) {
         break;
     case TAB_MARKETS:
         draw_markets_panel(x, y, w);
-        y += 90;
-        draw_news_panel(x, y, w); /* Show business news below markets */
         break;
     case TAB_SETTINGS:
         draw_settings_panel(x, y, w);
