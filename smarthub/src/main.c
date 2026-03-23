@@ -432,33 +432,62 @@ static void fetch_metrics(void) {
     }
 }
 
-static void fetch_news(void) {
+/* Threaded data fetchers — these do web searches which take 5-15s */
+static volatile bool news_fetching = false;
+static volatile bool markets_fetching = false;
+static volatile bool weather_fetching = false;
+
+static void *news_thread_fn(void *arg) {
+    (void)arg;
     char url[MAX_URL_LEN + 128];
     snprintf(url, sizeof(url), "%s/api/hub/news?category=%s", server_url, news_category);
     char *resp = http_get(url);
-    if (!resp) return;
-    news_count = 0;
-    const char *p = resp;
-    while (news_count < MAX_NEWS) {
-        const char *title_key = strstr(p, "\"title\"");
-        if (!title_key) break;
-        json_get_string(title_key - 1, "title", news_articles[news_count].title, sizeof(news_articles[0].title));
-        json_get_string(title_key - 1, "source", news_articles[news_count].source, sizeof(news_articles[0].source));
-        json_get_string(title_key - 1, "body", news_articles[news_count].body, sizeof(news_articles[0].body));
-        json_get_string(title_key - 1, "url", news_articles[news_count].url, sizeof(news_articles[0].url));
-        if (news_articles[news_count].title[0]) news_count++;
-        p = title_key + 7;
+    if (resp) {
+        news_count = 0;
+        const char *p = resp;
+        while (news_count < MAX_NEWS) {
+            const char *title_key = strstr(p, "\"title\"");
+            if (!title_key) break;
+            json_get_string(title_key - 1, "title", news_articles[news_count].title, sizeof(news_articles[0].title));
+            json_get_string(title_key - 1, "source", news_articles[news_count].source, sizeof(news_articles[0].source));
+            json_get_string(title_key - 1, "body", news_articles[news_count].body, sizeof(news_articles[0].body));
+            json_get_string(title_key - 1, "url", news_articles[news_count].url, sizeof(news_articles[0].url));
+            if (news_articles[news_count].title[0]) news_count++;
+            p = title_key + 7;
+        }
+        free(resp);
     }
-    free(resp);
+    news_fetching = false;
+    return NULL;
 }
 
-static void fetch_markets(void) {
+static void fetch_news(void) {
+    if (news_fetching) return;
+    news_fetching = true;
+    pthread_t tid;
+    pthread_create(&tid, NULL, news_thread_fn, NULL);
+    pthread_detach(tid);
+}
+
+static void *markets_thread_fn(void *arg) {
+    (void)arg;
     char url[MAX_URL_LEN + 64];
     snprintf(url, sizeof(url), "%s/api/hub/markets", server_url);
     char *resp = http_get(url);
-    if (!resp) return;
-    json_get_string(resp, "summary", market_summary, sizeof(market_summary));
-    free(resp);
+    if (resp) {
+        json_get_string(resp, "summary", market_summary, sizeof(market_summary));
+        free(resp);
+    }
+    markets_fetching = false;
+    return NULL;
+}
+
+static void fetch_markets(void) {
+    if (markets_fetching) return;
+    markets_fetching = true;
+    pthread_t tid;
+    pthread_create(&tid, NULL, markets_thread_fn, NULL);
+    pthread_detach(tid);
 }
 
 static void detect_location(void) {
@@ -491,11 +520,11 @@ static void parse_weather_json(const char *raw_json) {
     }
 }
 
-static void fetch_weather(void) {
+static void *weather_thread_fn(void *arg) {
+    (void)arg;
     /* Ensure we have a location */
     if (!detected_city[0]) detect_location();
 
-    /* Build weather request with detected or fallback location */
     const char *city = detected_city[0] ? detected_city : "auto";
     char body[512];
     snprintf(body, sizeof(body),
@@ -505,14 +534,21 @@ static void fetch_weather(void) {
     char url[MAX_URL_LEN + 64];
     snprintf(url, sizeof(url), "%s/mcp", server_url);
     char *resp = http_post(url, body);
-    if (!resp) return;
-
-    /* Find RAW_JSON block */
-    const char *raw = strstr(resp, "RAW_JSON:");
-    if (raw) {
-        parse_weather_json(raw);
+    if (resp) {
+        const char *raw = strstr(resp, "RAW_JSON:");
+        if (raw) parse_weather_json(raw);
+        free(resp);
     }
-    free(resp);
+    weather_fetching = false;
+    return NULL;
+}
+
+static void fetch_weather(void) {
+    if (weather_fetching) return;
+    weather_fetching = true;
+    pthread_t tid;
+    pthread_create(&tid, NULL, weather_thread_fn, NULL);
+    pthread_detach(tid);
 }
 
 /* ═══ Session Management ═══ */
