@@ -610,7 +610,7 @@ async def share_conversation(session_id: str):
 
 class CompareReq(BaseModel):
     message: str
-    models: list[str]  # e.g. ["dolphin3:8b", "deepseek-r1:8b"]
+    models: list[str]  # e.g. ["qwen3:8b", "deepseek-r1:8b"]
     session_id: str = "default"
 
 @app.post("/api/chat/compare")

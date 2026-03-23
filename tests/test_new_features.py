@@ -112,6 +112,11 @@ class TestUpgrades:
         from src.upgrades import get_fallback_model
         assert get_fallback_model("coding", "qwen2.5-coder:7b") == "dolphin3:8b"
         assert get_fallback_model("coding", "dolphin3:8b") == "qwen3:8b"
+        assert get_fallback_model("general", "qwen3:8b") == "dolphin3:8b"
+
+    def test_general_model_default(self):
+        from src.config import EXPERTS
+        assert EXPERTS["general"] == "qwen3:8b"
 
     def test_login_lockout(self):
         from src.upgrades import check_login_lockout, record_failed_login, clear_login_attempts

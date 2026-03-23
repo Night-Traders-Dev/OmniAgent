@@ -34,11 +34,11 @@ SESSION_FILE = "omni_session.json"
 PLAN_FILE = "plan.md"
 MEMORY_FILE = "memory.md"
 
-# dolphin3:8b is uncensored — used as the general/orchestrator model so it
-# never refuses to route or synthesize any task. Individual specialist models
-# (coding, reasoning) have their own guardrails.
+# qwen3:8b is the default general/orchestrator model for routing, planning,
+# and synthesis. Individual specialist models (coding, reasoning) keep their
+# own assignments and fallback chains.
 EXPERTS = {
-    "general": "dolphin3:8b",
+    "general": "qwen3:8b",
     "reasoning": "deepseek-r1:8b",
     "coding": "qwen2.5-coder:7b",
     "security": "dolphin3:8b",

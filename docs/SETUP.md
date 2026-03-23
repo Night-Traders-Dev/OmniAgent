@@ -18,7 +18,7 @@ cd OmniAgent
 curl -fsSL https://ollama.ai/install.sh | sh
 
 # 3. Pull required models
-ollama pull dolphin3:8b          # General/orchestrator (uncensored)
+ollama pull qwen3:8b             # General/orchestrator
 ollama pull qwen2.5-coder:7b     # Coding specialist
 ollama pull deepseek-r1:8b       # Reasoning specialist
 
@@ -64,14 +64,14 @@ pip install ddgs faiss-cpu
 
 | Model | Size | Purpose | Required |
 |-------|------|---------|----------|
-| `dolphin3:8b` | 4.9GB | General/orchestrator | Yes |
+| `qwen3:8b` | 5.2GB | General/orchestrator | Yes |
 | `qwen2.5-coder:7b` | 4.7GB | Code generation | Yes |
 | `deepseek-r1:8b` | 5.2GB | Reasoning | Yes |
 | `llama3.2-vision:11b` | 7.8GB | Image analysis | Optional |
 
 ```bash
 # Pull all models
-ollama pull dolphin3:8b
+ollama pull qwen3:8b
 ollama pull qwen2.5-coder:7b
 ollama pull deepseek-r1:8b
 ollama pull llama3.2-vision:11b  # Optional — for vision
@@ -136,7 +136,7 @@ npm install
 docker compose up -d
 
 # Pull models into the containerized Ollama
-docker compose exec ollama ollama pull dolphin3:8b
+docker compose exec ollama ollama pull qwen3:8b
 docker compose exec ollama ollama pull qwen2.5-coder:7b
 docker compose exec ollama ollama pull deepseek-r1:8b
 

@@ -20,7 +20,7 @@
 curl -fsSL https://ollama.ai/install.sh | sh
 
 # 2. Pull models
-ollama pull dolphin3:8b
+ollama pull qwen3:8b
 ollama pull qwen2.5-coder:7b
 ollama pull deepseek-r1:8b
 
@@ -37,7 +37,7 @@ python omni_agent.py
 
 ```bash
 docker compose up -d
-docker compose exec ollama ollama pull dolphin3:8b qwen2.5-coder:7b deepseek-r1:8b
+docker compose exec ollama ollama pull qwen3:8b qwen2.5-coder:7b deepseek-r1:8b
 # Open http://localhost:8000
 ```
 
@@ -78,7 +78,7 @@ DEV=1 python omni_agent.py
 
 | Role | Default Model | Purpose |
 |------|--------------|---------|
-| General/Orchestrator | `dolphin3:8b` | Task decomposition, synthesis (uncensored) |
+| General/Orchestrator | `qwen3:8b` | Task decomposition, synthesis |
 | Coding | `qwen2.5-coder:7b` | Code generation, editing, debugging |
 | Reasoning | `deepseek-r1:8b` | Chain-of-thought analysis, planning |
 | Security | `dolphin3:8b` | Security research, vulnerability analysis |

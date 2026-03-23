@@ -411,7 +411,7 @@ def main():
                 try:
                     import urllib.request as _ur, json as _j
                     from src.config import EXPERTS
-                    model = EXPERTS.get("general", "dolphin3:8b")
+                    model = EXPERTS.get("general", "qwen3:8b")
                     body = _j.dumps({"model": model, "prompt": "", "keep_alive": "10m"}).encode()
                     req = _ur.Request("http://localhost:11434/api/generate", data=body,
                                      headers={"Content-Type": "application/json"})

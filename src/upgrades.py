@@ -97,7 +97,7 @@ def check_ollama_health() -> bool:
 FALLBACK_CHAINS = {
     "coding": ["qwen2.5-coder:7b", "dolphin3:8b", "qwen3:8b"],
     "reasoning": ["deepseek-r1:8b", "dolphin3:8b", "qwen3:8b"],
-    "general": ["dolphin3:8b", "qwen3:8b", "qwen2.5:7b"],
+    "general": ["qwen3:8b", "dolphin3:8b", "qwen2.5:7b"],
     "security": ["dolphin3:8b", "qwen3:8b"],
 }
 

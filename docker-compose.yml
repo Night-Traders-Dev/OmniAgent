@@ -2,7 +2,7 @@ version: '3.8'
 
 # OmniAgent v8.1 — Docker Compose
 # Usage: docker compose up -d
-# Then: docker compose exec ollama ollama pull dolphin3:8b qwen2.5-coder:7b deepseek-r1:8b
+# Then: docker compose exec ollama ollama pull qwen3:8b qwen2.5-coder:7b deepseek-r1:8b
 
 services:
   omniagent:
