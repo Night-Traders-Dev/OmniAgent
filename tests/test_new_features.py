@@ -2,6 +2,7 @@
 import os
 import sys
 import json
+import types
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -130,6 +131,56 @@ class TestUpgrades:
     def test_upload_dir_size(self):
         from src.upgrades import check_upload_dir_size
         assert isinstance(check_upload_dir_size(), bool)
+
+
+class TestModelDefaults:
+    def test_detect_vision_model_prefers_qwen3_vl(self, monkeypatch):
+        from src import multimodal
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "models": [
+                        {"name": "llama3.2-vision:11b"},
+                        {"name": "qwen3-vl:8b"},
+                    ]
+                }).encode()
+
+        monkeypatch.setattr(multimodal.urllib.request, "urlopen", lambda *args, **kwargs: FakeResponse())
+        assert multimodal._detect_vision_model() == "qwen3-vl:8b"
+
+    def test_gpu_worker_verifier_defaults_to_qwen3(self, monkeypatch):
+        import gpu_worker
+
+        captured = {}
+
+        class FakeCompletions:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return types.SimpleNamespace(
+                    choices=[types.SimpleNamespace(message=types.SimpleNamespace(content='{"correct": true, "score": 9, "issues": [], "summary": "ok"}'))]
+                )
+
+        class FakeOpenAI:
+            def __init__(self, *args, **kwargs):
+                self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+        monkeypatch.delenv("VERIFY_MODEL", raising=False)
+        monkeypatch.setattr("openai.OpenAI", FakeOpenAI)
+
+        req = gpu_worker.VerifyReq(original_prompt="hello", original_result="world")
+        result = gpu_worker._verify_sync(req)
+
+        assert result["ok"] is True
+        assert captured["model"] == "qwen3:8b"
 
 
 class TestFeatures:

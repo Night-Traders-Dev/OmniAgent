@@ -469,7 +469,7 @@ def _verify_sync(req: VerifyReq) -> dict:
         )
 
         response = client.chat.completions.create(
-            model=os.environ.get("VERIFY_MODEL", "dolphin3:8b"),
+            model=os.environ.get("VERIFY_MODEL", "qwen3:8b"),
             messages=[{"role": "user", "content": check_prompt}],
             temperature=0.1,
         )

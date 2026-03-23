@@ -84,7 +84,7 @@ DEV=1 python omni_agent.py
 | Security | `dolphin3:8b` | Security research, vulnerability analysis |
 | Fast | `bitnet-2b` | Dispatch planning, classification (CPU) |
 | On-Device | Gemini Nano | Query rewrite, intent, sentiment, summarize (NPU) |
-| Vision | `llama3.2-vision:11b` | Image analysis |
+| Vision | `qwen3-vl:8b` | Image analysis |
 
 ## Key Features
 

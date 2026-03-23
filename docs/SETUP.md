@@ -67,14 +67,14 @@ pip install ddgs faiss-cpu
 | `qwen3:8b` | 5.2GB | General/orchestrator | Yes |
 | `qwen2.5-coder:7b` | 4.7GB | Code generation | Yes |
 | `deepseek-r1:8b` | 5.2GB | Reasoning | Yes |
-| `llama3.2-vision:11b` | 7.8GB | Image analysis | Optional |
+| `qwen3-vl:8b` | 6.1GB | Image analysis | Optional |
 
 ```bash
 # Pull all models
 ollama pull qwen3:8b
 ollama pull qwen2.5-coder:7b
 ollama pull deepseek-r1:8b
-ollama pull llama3.2-vision:11b  # Optional — for vision
+ollama pull qwen3-vl:8b          # Optional — for vision
 ```
 
 ### BitNet (Optional — CPU Acceleration)

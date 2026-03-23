@@ -2,7 +2,7 @@
 Multimodal capabilities: Vision, Image Generation, Voice (STT/TTS), Video Generation.
 
 All integrations are optional — they detect available services and fail gracefully.
-- Vision: Ollama multimodal models (LLaVA, Qwen2-VL, llama3.2-vision)
+- Vision: Ollama multimodal models (Qwen3-VL, LLaVA, Qwen2-VL, llama3.2-vision)
 - Image Gen: ComfyUI API or stable-diffusion-webui API (AUTOMATIC1111)
 - Voice STT: faster-whisper (local) or Whisper API
 - Voice TTS: Coqui XTTS, Bark, or piper-tts
@@ -26,7 +26,16 @@ UPLOAD_DIR.mkdir(exist_ok=True)
 # Vision — Analyze images via Ollama multimodal models
 # ============================================================
 
-VISION_MODELS = ["llama3.2-vision", "llava:13b", "llava:7b", "llava", "qwen2-vl", "minicpm-v"]
+VISION_MODELS = [
+    "qwen3-vl:8b",
+    "qwen3-vl",
+    "llama3.2-vision",
+    "llava:13b",
+    "llava:7b",
+    "llava",
+    "qwen2-vl",
+    "minicpm-v",
+]
 
 def _detect_vision_model() -> str | None:
     """Find an installed vision-capable model on Ollama."""
@@ -48,7 +57,7 @@ def analyze_image(image_path: str, prompt: str = "Describe this image in detail.
     """Analyze an image using a multimodal Ollama model."""
     model = _detect_vision_model()
     if not model:
-        return "ERROR: No vision model installed. Install one with: ollama pull llama3.2-vision"
+        return "ERROR: No vision model installed. Install one with: ollama pull qwen3-vl:8b"
 
     # Read and base64 encode the image
     image_path = os.path.realpath(image_path)

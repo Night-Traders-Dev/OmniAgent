@@ -68,6 +68,7 @@ The key is derived via PBKDF2 (100K iterations) from the shared secret. Without 
 ### Result Verification
 - Runs a prompt through the worker's local Ollama to double-check results
 - Independent model checks the primary model's output for correctness
+- Defaults to `qwen3:8b` for balanced verification quality on midrange GPUs
 - Set `VERIFY_MODEL` env var to choose the verification model
 
 ### Large Model Routing
