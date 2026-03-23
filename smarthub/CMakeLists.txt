@@ -9,7 +9,11 @@ pkg_check_modules(SDL2 REQUIRED sdl2)
 pkg_check_modules(SDL2_TTF REQUIRED SDL2_ttf)
 pkg_check_modules(CURL REQUIRED libcurl)
 
-add_executable(omni-hub src/main.c)
+add_executable(omni-hub
+    src/main.c
+    src/keyboard.c
+    src/login.c
+)
 
 target_include_directories(omni-hub PRIVATE
     ${SDL2_INCLUDE_DIRS}

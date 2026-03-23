@@ -18,6 +18,8 @@
 #include <time.h>
 #include <pthread.h>
 #include <curl/curl.h>
+#include "keyboard.h"
+#include "login.h"
 
 /* ═══ Configuration ═══ */
 #define WINDOW_W 1024
@@ -108,6 +110,10 @@ static ServerMetrics metrics = {0};
 static Uint32 last_poll_time = 0;
 static Uint32 last_weather_time = 0;
 static bool running = true;
+
+/* Touch keyboard + Login */
+static Keyboard vkb;
+static LoginState login_state;
 
 /* Forward declarations */
 static void save_server_url(void);
@@ -706,15 +712,17 @@ static void handle_touch(int x, int y) {
     }
 
     /* Input field */
-    int iy = WINDOW_H - INPUT_H;
-    if (y >= iy) {
+    int kb_h = kb_get_height(&vkb);
+    int iy = WINDOW_H - INPUT_H - kb_h;
+    if (y >= iy && y < WINDOW_H - kb_h) {
         if (x >= WINDOW_W - 56) {
             /* Send button */
             send_message();
         } else {
-            /* Text field — activate keyboard */
+            /* Text field — show virtual keyboard */
             input_active = true;
-            SDL_StartTextInput();
+            kb_attach(&vkb, input_text, &input_cursor, sizeof(input_text));
+            kb_show(&vkb);
         }
         return;
     }
@@ -818,6 +826,10 @@ int main(int argc, char *argv[]) {
         if (auto_discover()) {
             show_connect_dialog = false;
             save_server_url();
+            /* Go to login screen */
+            login_state.active = true;
+            snprintf(login_state.server_display, sizeof(login_state.server_display),
+                     "Connected to %s", server_url);
         }
     }
 
@@ -872,10 +884,22 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    /* Initialize keyboard and login */
+    kb_init(&vkb);
+    login_init(&login_state);
+
     /* Initial fetch if URL provided */
     if (server_url[0]) {
         fetch_metrics();
-        if (metrics.connected) fetch_weather();
+        if (metrics.connected) {
+            snprintf(login_state.server_display, sizeof(login_state.server_display),
+                     "Connected to %s", server_url);
+            fetch_weather();
+        }
+    }
+    /* If not connected, login screen will show but user needs to connect first */
+    if (!server_url[0]) {
+        login_state.active = false; /* Show connect dialog first */
     }
 
     SDL_Event event;
@@ -885,10 +909,90 @@ int main(int argc, char *argv[]) {
         frame_start = SDL_GetTicks();
 
         while (SDL_PollEvent(&event)) {
+            if (event.type == SDL_QUIT) { running = false; break; }
+
+            /* Escape key: hide keyboard or quit */
+            if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
+                if (vkb.visible) { kb_hide(&vkb); }
+                else if (input_active) { input_active = false; }
+                else { running = false; }
+                continue;
+            }
+
+            /* Virtual keyboard consumes touch events in its area */
+            if (kb_handle_event(&vkb, &event, WINDOW_W, WINDOW_H)) {
+                /* Check if keyboard enter was pressed while on login screen */
+                if (!vkb.visible && login_state.active && login_state.focused_field == LOGIN_FIELD_PASSWORD) {
+                    login_attempt(&login_state, server_url);
+                }
+                continue;
+            }
+
+            /* Login screen consumes all events when active */
+            if (login_state.active) {
+                if (login_handle_event(&login_state, &vkb, &event, WINDOW_W, WINDOW_H)) {
+                    /* Check if login button was tapped (field is NONE after tap) */
+                    if (login_state.focused_field == LOGIN_FIELD_NONE
+                        && login_state.username[0] && login_state.password[0]
+                        && !login_state.authenticating && !login_state.authenticated) {
+                        login_attempt(&login_state, server_url);
+                    }
+                    continue;
+                }
+            }
+
+            /* Connect dialog */
+            if (show_connect_dialog) {
+                int tx = -1, ty = -1;
+                if (event.type == SDL_MOUSEBUTTONDOWN) { tx = event.button.x; ty = event.button.y; }
+                else if (event.type == SDL_FINGERDOWN) { tx = (int)(event.tfinger.x * WINDOW_W); ty = (int)(event.tfinger.y * WINDOW_H); }
+
+                if (tx >= 0) {
+                    int dw = 380, dh = 200;
+                    int dx = (WINDOW_W - dw) / 2, dy = (WINDOW_H - dh) / 2;
+                    /* URL input field — attach keyboard */
+                    if (tx >= dx + 20 && tx <= dx + dw - 20 && ty >= dy + 60 && ty <= dy + 104) {
+                        kb_attach(&vkb, connect_url_input, &connect_cursor, sizeof(connect_url_input));
+                        kb_show(&vkb);
+                    }
+                    /* Connect button */
+                    if (tx >= dx + 20 && tx <= dx + dw - 20 && ty >= dy + 120 && ty <= dy + 168) {
+                        kb_hide(&vkb);
+                        if (connect_url_input[0]) {
+                            if (strncmp(connect_url_input, "http", 4) != 0)
+                                snprintf(server_url, sizeof(server_url), "http://%s", connect_url_input);
+                            else
+                                snprintf(server_url, sizeof(server_url), "%s", connect_url_input);
+                            fetch_metrics();
+                            if (metrics.connected) {
+                                show_connect_dialog = false;
+                                save_server_url();
+                                snprintf(login_state.server_display, sizeof(login_state.server_display),
+                                         "Connected to %s", connect_url_input);
+                                login_state.active = true; /* Show login */
+                            }
+                        }
+                    }
+                }
+                /* Physical keyboard input for connect dialog */
+                if (event.type == SDL_TEXTINPUT && !vkb.visible) {
+                    size_t len = strlen(connect_url_input);
+                    if (len + strlen(event.text.text) < sizeof(connect_url_input) - 1) {
+                        strcat(connect_url_input, event.text.text);
+                    }
+                } else if (event.type == SDL_KEYDOWN && !vkb.visible) {
+                    if (event.key.keysym.sym == SDLK_RETURN) {
+                        handle_touch(WINDOW_W/2, WINDOW_H/2 + 40);
+                    } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
+                        size_t len = strlen(connect_url_input);
+                        if (len > 0) connect_url_input[len - 1] = '\0';
+                    }
+                }
+                continue;
+            }
+
+            /* Main hub event handling */
             switch (event.type) {
-            case SDL_QUIT:
-                running = false;
-                break;
             case SDL_MOUSEBUTTONDOWN:
             case SDL_FINGERDOWN: {
                 int tx, ty;
@@ -903,13 +1007,8 @@ int main(int argc, char *argv[]) {
                 break;
             }
             case SDL_TEXTINPUT:
-                if (show_connect_dialog) {
-                    size_t len = strlen(connect_url_input);
-                    if (len + strlen(event.text.text) < sizeof(connect_url_input) - 1) {
-                        strcat(connect_url_input, event.text.text);
-                        connect_cursor = strlen(connect_url_input);
-                    }
-                } else if (input_active) {
+                /* Physical keyboard input (fallback when virtual kb hidden) */
+                if (!vkb.visible && input_active) {
                     size_t len = strlen(input_text);
                     if (len + strlen(event.text.text) < sizeof(input_text) - 1) {
                         strcat(input_text, event.text.text);
@@ -918,24 +1017,11 @@ int main(int argc, char *argv[]) {
                 }
                 break;
             case SDL_KEYDOWN:
-                if (event.key.keysym.sym == SDLK_RETURN) {
-                    if (show_connect_dialog) {
-                        handle_touch((WINDOW_W)/2, (WINDOW_H)/2 + 40); /* Trigger connect */
-                    } else {
-                        send_message();
-                    }
-                } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
-                    if (show_connect_dialog) {
-                        size_t len = strlen(connect_url_input);
-                        if (len > 0) connect_url_input[len - 1] = '\0';
-                    } else {
+                if (!vkb.visible) {
+                    if (event.key.keysym.sym == SDLK_RETURN) send_message();
+                    else if (event.key.keysym.sym == SDLK_BACKSPACE) {
                         size_t len = strlen(input_text);
                         if (len > 0) input_text[len - 1] = '\0';
-                    }
-                } else if (event.key.keysym.sym == SDLK_ESCAPE) {
-                    if (input_active) {
-                        input_active = false;
-                        SDL_StopTextInput();
                     }
                 }
                 break;
@@ -943,12 +1029,16 @@ int main(int argc, char *argv[]) {
                 scroll_offset -= event.wheel.y * 30;
                 if (scroll_offset < 0) scroll_offset = 0;
                 break;
+            default: break;
             }
         }
 
-        /* Periodic polling */
+        /* Update keyboard (backspace repeat) */
+        kb_update(&vkb);
+
+        /* Periodic polling (only when logged in) */
         Uint32 now = SDL_GetTicks();
-        if (!show_connect_dialog && server_url[0]) {
+        if (!show_connect_dialog && !login_state.active && server_url[0]) {
             if (now - last_poll_time > POLL_INTERVAL_MS) {
                 last_poll_time = now;
                 fetch_metrics();
@@ -963,13 +1053,19 @@ int main(int argc, char *argv[]) {
         set_color(COL_BG);
         SDL_RenderClear(renderer);
 
-        draw_topbar();
-        draw_sidebar();
-        draw_chat();
-        draw_input_bar();
-
         if (show_connect_dialog) {
             draw_connect_dialog();
+            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
+        } else if (login_state.active) {
+            login_render(&login_state, renderer, font_regular, font_small, font_large,
+                         WINDOW_W, WINDOW_H);
+            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
+        } else {
+            draw_topbar();
+            draw_sidebar();
+            draw_chat();
+            draw_input_bar();
+            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
         }
 
         SDL_RenderPresent(renderer);
