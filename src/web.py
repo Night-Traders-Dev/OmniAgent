@@ -2574,45 +2574,127 @@ async def hub_discover():
         },
     })
 
+def _hub_parse_article_datetime(value: str):
+    from datetime import datetime
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.astimezone()
+        return parsed
+    except Exception:
+        return None
+
+
+def _hub_today_news(query: str, *, max_results: int = 8) -> list[dict]:
+    from datetime import datetime
+    from ddgs import DDGS
+
+    local_today = datetime.now().astimezone().date()
+    try:
+        raw_items = DDGS().news(query, max_results=max_results * 2, timelimit="d", safesearch="off") or []
+    except Exception:
+        raw_items = []
+
+    articles = []
+    for item in raw_items:
+        published_at = _hub_parse_article_datetime(item.get("date", ""))
+        url = item.get("url", "") or ""
+        articles.append({
+            "title": item.get("title", "") or "",
+            "body": (item.get("body", "") or "")[:200],
+            "url": url,
+            "source": item.get("source", "") or "",
+            "thumbnail": item.get("image", "") or (f"https://www.google.com/s2/favicons?domain={url.split('/')[2]}&sz=64" if "://" in url else ""),
+            "published": published_at.isoformat() if published_at else "",
+            "_sort_key": published_at.timestamp() if published_at else 0,
+            "_is_today": bool(published_at and published_at.astimezone().date() == local_today),
+        })
+
+    articles.sort(key=lambda article: article["_sort_key"], reverse=True)
+    todays = [article for article in articles if article["_is_today"]]
+    fallback = [article for article in articles if not article["_is_today"]]
+    selected = (todays + fallback)[:max_results]
+    for article in selected:
+        article.pop("_sort_key", None)
+        article.pop("_is_today", None)
+    return selected
+
+
+def _hub_fetch_json(url: str):
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 OmniAgent/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _hub_fetch_yahoo_screen(screen_id: str, *, count: int = 3) -> list[dict]:
+    try:
+        data = _hub_fetch_json(
+            f"https://query1.finance.yahoo.com/v1/finance/screener/predefined/saved?count={count}&scrIds={screen_id}"
+        )
+    except Exception:
+        return []
+
+    result = ((data.get("finance") or {}).get("result") or [])
+    if not result:
+        return []
+    return (result[0].get("quotes") or [])[:count]
+
+
+def _hub_fetch_top_crypto(*, count: int = 3) -> list[dict]:
+    stablecoins = {"USDT", "USDC", "DAI", "USDE", "FDUSD", "TUSD", "USDS", "STETH", "WSTETH"}
+    try:
+        data = _hub_fetch_json(
+            "https://api.coingecko.com/api/v3/coins/markets"
+            f"?vs_currency=usd&order=market_cap_desc&per_page={count * 3}&page=1&sparkline=false&price_change_percentage=24h"
+        )
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    filtered = [item for item in data if (item.get("symbol") or "").upper() not in stablecoins]
+    return filtered[:count]
+
+
+def _hub_format_market_line(label: str, items: list[dict], *, kind: str) -> str:
+    formatted = []
+    for item in items[:3]:
+        if kind == "crypto":
+            symbol = (item.get("symbol") or "").upper()
+            change = item.get("price_change_percentage_24h_in_currency", item.get("price_change_percentage_24h"))
+        else:
+            symbol = item.get("symbol") or ""
+            change = item.get("regularMarketChangePercent")
+        if not symbol or change is None:
+            continue
+        try:
+            formatted.append(f"{symbol} {float(change):+.1f}%")
+        except Exception:
+            continue
+    return f"{label}: {', '.join(formatted)}" if formatted else f"{label}: No data"
+
 @app.get("/api/hub/news")
 async def hub_news(category: str = "top"):
     """Fetch news headlines for the Smart Hub Live Area.
     Categories: top, local, national, global, tech, business."""
     import asyncio
     loop = asyncio.get_event_loop()
-    from src.tools import web_search, fetch_url
-    import json as _json
 
     queries = {
-        "top": "top news headlines today",
+        "top": "top headlines US today",
         "local": f"local news {_user_location.get('default', {}).get('city', 'US')} today",
         "national": "US national news today",
-        "global": "world news headlines today",
+        "global": "world news today",
         "tech": "technology news today",
-        "business": "stock market business news today",
+        "business": "business and markets news today",
     }
     query = queries.get(category, queries["top"])
 
     def _fetch():
-        results_raw = web_search(query, max_results=8)
-        try:
-            items = _json.loads(results_raw)
-        except Exception:
-            items = []
-        news = []
-        for item in items[:8]:
-            href = item.get("href", "")
-            source = href.split("/")[2] if "://" in href else ""
-            # Generate favicon URL as thumbnail (fast, no extra fetch needed)
-            thumb = f"https://www.google.com/s2/favicons?domain={source}&sz=64" if source else ""
-            news.append({
-                "title": item.get("title", ""),
-                "body": item.get("body", "")[:200],
-                "url": href,
-                "source": source,
-                "thumbnail": thumb,
-            })
-        return news
+        return _hub_today_news(query, max_results=8)
 
     news = await loop.run_in_executor(None, _fetch)
     return JSONResponse({"category": category, "articles": news})
@@ -2622,35 +2704,21 @@ async def hub_markets():
     """Fetch market data for the Smart Hub Live Area."""
     import asyncio
     loop = asyncio.get_event_loop()
-    import json as _json
 
     def _fetch():
-        from src.tools import web_search
-        # Fetch individual market indices
-        symbols = [
-            {"name": "S&P 500", "symbol": "SPX", "query": "S&P 500 index price today"},
-            {"name": "Nasdaq", "symbol": "IXIC", "query": "Nasdaq composite price today"},
-            {"name": "Dow Jones", "symbol": "DJI", "query": "Dow Jones price today"},
-            {"name": "Bitcoin", "symbol": "BTC", "query": "Bitcoin BTC price today USD"},
-            {"name": "Ethereum", "symbol": "ETH", "query": "Ethereum ETH price today USD"},
-        ]
-        tickers = []
-        # Single search for all
-        results_raw = web_search("S&P 500 Nasdaq Dow Jones Bitcoin Ethereum price today", max_results=5)
-        try:
-            items = _json.loads(results_raw)
-            summary = "; ".join(f"{i.get('title','')}" for i in items[:5])
-        except Exception:
-            items = []
-            summary = "Market data unavailable"
-
-        for sym in symbols:
-            tickers.append({
-                "name": sym["name"],
-                "symbol": sym["symbol"],
-                "icon": f"https://www.google.com/s2/favicons?domain=finance.yahoo.com&sz=32",
-            })
-        return {"tickers": tickers, "summary": summary}
+        stocks = _hub_fetch_yahoo_screen("most_actives", count=3)
+        etfs = _hub_fetch_yahoo_screen("most_actives_etfs", count=3)
+        crypto = _hub_fetch_top_crypto(count=3)
+        return {
+            "stocks": stocks,
+            "etfs": etfs,
+            "crypto": crypto,
+            "summary": "; ".join([
+                _hub_format_market_line("Stocks", stocks, kind="equity"),
+                _hub_format_market_line("ETFs", etfs, kind="etf"),
+                _hub_format_market_line("Crypto", crypto, kind="crypto"),
+            ]),
+        }
 
     data = await loop.run_in_executor(None, _fetch)
     data["timestamp"] = __import__("time").time()

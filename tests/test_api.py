@@ -2,6 +2,7 @@
 import json
 import secrets
 import pytest
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, AsyncMock
 from fastapi.testclient import TestClient
 from src.web import app
@@ -218,6 +219,75 @@ class TestSecurityGuards:
         _, sid = _create_test_session(admin=False)
         r = client.get(f"/api/auth/invite/list?session_id={sid}")
         assert r.status_code == 403
+
+
+class TestHubFeeds:
+    def test_hub_today_news_prefers_same_day_articles(self):
+        from src.web import _hub_today_news
+
+        now = datetime.now(timezone.utc)
+        older = (now - timedelta(days=1)).isoformat()
+        today = now.isoformat()
+
+        class FakeDDGS:
+            def news(self, *args, **kwargs):
+                return [
+                    {"date": older, "title": "Older", "body": "old", "url": "https://old.example/a", "image": "", "source": "Old"},
+                    {"date": today, "title": "Today", "body": "new", "url": "https://today.example/b", "image": "https://img.example/b.jpg", "source": "Today"},
+                ]
+
+        with patch("ddgs.DDGS", return_value=FakeDDGS()):
+            articles = _hub_today_news("test", max_results=2)
+
+        assert articles[0]["title"] == "Today"
+        assert articles[0]["thumbnail"] == "https://img.example/b.jpg"
+        assert len(articles) == 2
+
+    def test_hub_markets_summary_includes_stocks_etfs_and_crypto(self, client):
+        stock_quotes = [
+            {"symbol": "NVDA", "regularMarketChangePercent": 2.16},
+            {"symbol": "SMCI", "regularMarketChangePercent": 6.09},
+            {"symbol": "ONDS", "regularMarketChangePercent": 8.53},
+        ]
+        etf_quotes = [
+            {"symbol": "SPY", "regularMarketChangePercent": 0.42},
+            {"symbol": "QQQ", "regularMarketChangePercent": 0.87},
+            {"symbol": "IWM", "regularMarketChangePercent": -0.33},
+        ]
+        crypto_quotes = [
+            {"symbol": "btc", "price_change_percentage_24h_in_currency": 3.92},
+            {"symbol": "eth", "price_change_percentage_24h_in_currency": 4.11},
+            {"symbol": "sol", "price_change_percentage_24h_in_currency": 5.48},
+        ]
+
+        with patch("src.web._hub_fetch_yahoo_screen", side_effect=[stock_quotes, etf_quotes]), \
+             patch("src.web._hub_fetch_top_crypto", return_value=crypto_quotes):
+            r = client.get("/api/hub/markets")
+
+        assert r.status_code == 200
+        data = r.json()
+        assert "Stocks:" in data["summary"]
+        assert "ETFs:" in data["summary"]
+        assert "Crypto:" in data["summary"]
+        assert data["stocks"][0]["symbol"] == "NVDA"
+        assert data["etfs"][0]["symbol"] == "SPY"
+        assert data["crypto"][0]["symbol"] == "btc"
+
+    def test_hub_top_crypto_skips_stablecoins(self):
+        from src.web import _hub_fetch_top_crypto
+
+        payload = [
+            {"symbol": "btc", "price_change_percentage_24h_in_currency": 3.0},
+            {"symbol": "usdt", "price_change_percentage_24h_in_currency": 0.0},
+            {"symbol": "eth", "price_change_percentage_24h_in_currency": 2.0},
+            {"symbol": "usdc", "price_change_percentage_24h_in_currency": 0.0},
+            {"symbol": "sol", "price_change_percentage_24h_in_currency": 5.0},
+        ]
+
+        with patch("src.web._hub_fetch_json", return_value=payload):
+            crypto = _hub_fetch_top_crypto(count=3)
+
+        assert [item["symbol"] for item in crypto] == ["btc", "eth", "sol"]
 
     def test_non_owner_cannot_share_session(self, client):
         owner, owner_sid = _create_test_session()

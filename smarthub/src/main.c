@@ -123,6 +123,9 @@ static Uint32 last_weather_time = 0;
 static bool running = true;
 static int screen_w = WINDOW_W;
 static int screen_h = WINDOW_H;
+static bool weather_refresh_pending = true;
+static bool news_refresh_pending = true;
+static bool markets_refresh_pending = true;
 
 /* Touch keyboard + Login + Animated background + Context menu */
 static Keyboard vkb;
@@ -171,7 +174,7 @@ static Uint32 last_news_time = 0;
 /* Market data */
 static char market_summary[1024] = "";
 static Uint32 last_market_time = 0;
-#define MARKET_INTERVAL_MS 120000  /* 2 min */
+#define MARKET_INTERVAL_MS 300000  /* 5 min */
 
 /* Thinking/Reasoning log */
 #define MAX_THINKING 20
@@ -484,12 +487,26 @@ static volatile bool news_fetching = false;
 static volatile bool markets_fetching = false;
 static volatile bool weather_fetching = false;
 
+typedef struct {
+    char category[32];
+} NewsFetchArgs;
+
 static void *news_thread_fn(void *arg) {
-    (void)arg;
+    NewsFetchArgs *args = (NewsFetchArgs *)arg;
+    char requested_category[32] = "top";
+    if (args) {
+        snprintf(requested_category, sizeof(requested_category), "%s", args->category);
+        free(args);
+    }
     char url[MAX_URL_LEN + 128];
-    snprintf(url, sizeof(url), "%s/api/hub/news?category=%s", server_url, news_category);
+    snprintf(url, sizeof(url), "%s/api/hub/news?category=%s", server_url, requested_category);
     char *resp = http_get(url);
     if (resp) {
+        if (strcmp(requested_category, news_category) != 0) {
+            free(resp);
+            news_fetching = false;
+            return NULL;
+        }
         /* Free old thumbnails */
         for (int i = 0; i < news_count; i++) {
             if (news_articles[i].thumb_tex) {
@@ -517,12 +534,23 @@ static void *news_thread_fn(void *arg) {
     return NULL;
 }
 
-static void fetch_news(void) {
-    if (news_fetching) return;
+static bool fetch_news(void) {
+    if (news_fetching) return false;
     news_fetching = true;
+    NewsFetchArgs *args = malloc(sizeof(NewsFetchArgs));
+    if (!args) {
+        news_fetching = false;
+        return false;
+    }
+    snprintf(args->category, sizeof(args->category), "%s", news_category);
     pthread_t tid;
-    pthread_create(&tid, NULL, news_thread_fn, NULL);
+    if (pthread_create(&tid, NULL, news_thread_fn, args) != 0) {
+        free(args);
+        news_fetching = false;
+        return false;
+    }
     pthread_detach(tid);
+    return true;
 }
 
 static void *markets_thread_fn(void *arg) {
@@ -538,12 +566,16 @@ static void *markets_thread_fn(void *arg) {
     return NULL;
 }
 
-static void fetch_markets(void) {
-    if (markets_fetching) return;
+static bool fetch_markets(void) {
+    if (markets_fetching) return false;
     markets_fetching = true;
     pthread_t tid;
-    pthread_create(&tid, NULL, markets_thread_fn, NULL);
+    if (pthread_create(&tid, NULL, markets_thread_fn, NULL) != 0) {
+        markets_fetching = false;
+        return false;
+    }
     pthread_detach(tid);
+    return true;
 }
 
 static void detect_location(void) {
@@ -634,12 +666,22 @@ static void *weather_thread_fn(void *arg) {
     return NULL;
 }
 
-static void fetch_weather(void) {
-    if (weather_fetching) return;
+static bool fetch_weather(void) {
+    if (weather_fetching) return false;
     weather_fetching = true;
     pthread_t tid;
-    pthread_create(&tid, NULL, weather_thread_fn, NULL);
+    if (pthread_create(&tid, NULL, weather_thread_fn, NULL) != 0) {
+        weather_fetching = false;
+        return false;
+    }
     pthread_detach(tid);
+    return true;
+}
+
+static void queue_hub_refresh(bool weather_now, bool news_now, bool markets_now) {
+    if (weather_now) weather_refresh_pending = true;
+    if (news_now) news_refresh_pending = true;
+    if (markets_now) markets_refresh_pending = true;
 }
 
 /* ═══ Session Management ═══ */
@@ -883,8 +925,7 @@ static void *send_message_thread(void *arg) {
             if (strstr(reply, "°F") || strstr(reply, "°C") ||
                 strstr(reply, "temperature") || strstr(reply, "weather") ||
                 strstr(reply, "forecast") || strstr(reply, "humidity")) {
-                /* Trigger a fresh weather fetch on next frame */
-                last_weather_time = 0;
+                weather_refresh_pending = true;
             }
             /* Generate smart reply chips based on response content */
             generate_chips(reply);
@@ -1679,7 +1720,7 @@ static void handle_touch(int x, int y) {
                 if (metrics.connected) {
                     show_connect_dialog = false;
                     save_server_url();
-                    fetch_weather();
+                    queue_hub_refresh(true, true, true);
                 }
             }
             return;
@@ -1756,8 +1797,8 @@ static void handle_touch(int x, int y) {
             if (tab_idx >= 0 && tab_idx < 4) {
                 sidebar_tab = tabs[tab_idx];
                 /* Trigger data fetch for the tab */
-                if (sidebar_tab == TAB_NEWS && news_count == 0) last_news_time = 0;
-                if (sidebar_tab == TAB_MARKETS && !market_summary[0]) last_market_time = 0;
+                if (sidebar_tab == TAB_NEWS && news_count == 0) news_refresh_pending = true;
+                if (sidebar_tab == TAB_MARKETS && !market_summary[0]) markets_refresh_pending = true;
             }
             return;
         }
@@ -1771,7 +1812,7 @@ static void handle_touch(int x, int y) {
                 int tw = 0; TTF_SizeUTF8(font_small, cats[i], &tw, NULL);
                 if (x >= cx_check && x <= cx_check + tw + 16) {
                     snprintf(news_category, sizeof(news_category), "%s", cat_ids[i]);
-                    last_news_time = 0; /* Force refresh */
+                    news_refresh_pending = true;
                     return;
                 }
                 cx_check += tw + 22;
@@ -1784,7 +1825,7 @@ static void handle_touch(int x, int y) {
         /* Weather widget tap — refresh now */
         int wy = TOPBAR_H + TAB_BAR_H + 8;
         if (y >= wy && y <= wy + 130) {
-            last_weather_time = 0; /* triggers fetch on next frame */
+            weather_refresh_pending = true;
             return;
         }
 
@@ -2032,7 +2073,7 @@ int main(int argc, char *argv[]) {
         if (metrics.connected) {
             snprintf(login_state.server_display, sizeof(login_state.server_display),
                      "Connected to %s", server_url);
-            fetch_weather();
+            queue_hub_refresh(true, true, true);
         }
     }
     /* If not connected, login screen will show but user needs to connect first */
@@ -2241,20 +2282,21 @@ int main(int argc, char *argv[]) {
                 last_poll_time = now;
                 fetch_metrics();
             }
-            /* Fetch weather: immediately on first frame after login, then every 15 min */
-            if (last_weather_time == 0 || now - last_weather_time > WEATHER_INTERVAL_MS) {
+            /* Fetch on startup and then every 5 minutes without blocking the UI. */
+            if ((weather_refresh_pending || last_weather_time == 0 || now - last_weather_time > WEATHER_INTERVAL_MS)
+                && fetch_weather()) {
                 last_weather_time = now;
-                fetch_weather();
+                weather_refresh_pending = false;
             }
-            /* News polling */
-            if (last_news_time == 0 || now - last_news_time > NEWS_INTERVAL_MS) {
+            if ((news_refresh_pending || last_news_time == 0 || now - last_news_time > NEWS_INTERVAL_MS)
+                && fetch_news()) {
                 last_news_time = now;
-                fetch_news();
+                news_refresh_pending = false;
             }
-            /* Market polling */
-            if (last_market_time == 0 || now - last_market_time > MARKET_INTERVAL_MS) {
+            if ((markets_refresh_pending || last_market_time == 0 || now - last_market_time > MARKET_INTERVAL_MS)
+                && fetch_markets()) {
                 last_market_time = now;
-                fetch_markets();
+                markets_refresh_pending = false;
             }
         }
 
