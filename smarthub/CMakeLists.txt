@@ -14,6 +14,7 @@ add_executable(omni-hub
     src/keyboard.c
     src/login.c
     src/background.c
+    src/menu.c
 )
 
 # Link math library for sin/cos/sqrt

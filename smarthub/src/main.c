@@ -22,6 +22,7 @@
 #include "keyboard.h"
 #include "login.h"
 #include "background.h"
+#include "menu.h"
 
 /* ═══ Configuration ═══ */
 #define WINDOW_W 1024
@@ -99,6 +100,7 @@ static TTF_Font *font_huge = NULL;
 
 static char server_url[MAX_URL_LEN] = "";
 static char detected_city[128] = "";
+static char sessionId[64] = "hub";
 static char input_text[MAX_MSG_LEN] = "";
 static int input_cursor = 0;
 static bool input_active = false;
@@ -120,13 +122,44 @@ static bool running = true;
 static int screen_w = WINDOW_W;
 static int screen_h = WINDOW_H;
 
-/* Touch keyboard + Login + Animated background */
+/* Touch keyboard + Login + Animated background + Context menu */
 static Keyboard vkb;
 static LoginState login_state;
 static AnimatedBG anim_bg;
+static ContextMenu ctx_menu;
+
+/* Session management */
+#define MAX_SESSIONS 50
+typedef struct {
+    char id[64];
+    char title[128];
+    int message_count;
+} SessionEntry;
+static SessionEntry sessions[MAX_SESSIONS];
+static int session_count = 0;
+static bool show_session_drawer = false;
+
+/* Smart reply chips */
+#define MAX_CHIPS 4
+static char smart_chips[MAX_CHIPS][128];
+static int chip_count = 0;
+
+/* Long-press tracking */
+static Uint32 touch_down_time = 0;
+static int touch_down_x = 0, touch_down_y = 0;
+static bool long_press_fired = false;
+
+/* Context menu action IDs */
+enum {
+    ACT_COPY = 1, ACT_RESEND, ACT_RESEND_MODEL, ACT_BRANCH, ACT_PIN,
+    ACT_SHARE, ACT_RATE_UP, ACT_RATE_DOWN, ACT_DELETE_MSG,
+    ACT_SESSION_SWITCH, ACT_SESSION_RENAME, ACT_SESSION_DELETE, ACT_SESSION_EXPORT,
+    ACT_WIDGET_REFRESH, ACT_NEW_CHAT,
+};
 
 /* Forward declarations */
 static void save_server_url(void);
+static void send_message(void);
 
 /* ═══ Curl helper ═══ */
 typedef struct {
@@ -387,6 +420,214 @@ static void fetch_weather(void) {
     free(resp);
 }
 
+/* ═══ Session Management ═══ */
+
+static void fetch_sessions(void) {
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "%s/api/auth/sessions?session_id=%s", server_url, sessionId);
+    char *resp = http_get(url);
+    if (!resp) return;
+    /* Parse JSON array — minimal parse for [{id, title, message_count},...] */
+    session_count = 0;
+    const char *p = resp;
+    while (session_count < MAX_SESSIONS) {
+        const char *id_start = strstr(p, "\"id\"");
+        if (!id_start) break;
+        json_get_string(id_start - 1, "id", sessions[session_count].id, sizeof(sessions[0].id));
+        json_get_string(id_start - 1, "title", sessions[session_count].title, sizeof(sessions[0].title));
+        sessions[session_count].message_count = json_get_int(id_start - 1, "message_count");
+        if (!sessions[session_count].title[0])
+            snprintf(sessions[session_count].title, sizeof(sessions[0].title), "Session %d", session_count + 1);
+        session_count++;
+        p = id_start + 4;
+    }
+    free(resp);
+}
+
+static void new_chat(void) {
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "%s/api/auth/sessions/new", server_url);
+    char body[256];
+    snprintf(body, sizeof(body), "{\"session_id\":\"%s\"}", sessionId);
+    char *resp = http_post(url, body);
+    if (resp) {
+        char new_sid[64];
+        json_get_string(resp, "session_id", new_sid, sizeof(new_sid));
+        if (new_sid[0]) {
+            snprintf(sessionId, sizeof(sessionId), "%s", new_sid);
+            msg_count = 0;
+            scroll_offset = 0;
+            chip_count = 0;
+        }
+        free(resp);
+    }
+    fetch_sessions();
+}
+
+static void switch_session(const char *sid) {
+    snprintf(sessionId, sizeof(sessionId), "%s", sid);
+    /* Load messages for this session */
+    char url[MAX_URL_LEN + 128];
+    snprintf(url, sizeof(url), "%s/api/auth/sessions/load", server_url);
+    char body[256];
+    snprintf(body, sizeof(body), "{\"session_id\":\"%s\",\"target_session_id\":\"%s\"}", sessionId, sid);
+    char *resp = http_post(url, body);
+    msg_count = 0;
+    scroll_offset = 0;
+    chip_count = 0;
+    if (resp) {
+        /* Parse messages from response */
+        const char *p = resp;
+        while (msg_count < MAX_MESSAGES) {
+            const char *role = strstr(p, "\"role\"");
+            if (!role) break;
+            char r[16], c[MAX_MSG_LEN];
+            json_get_string(role - 1, "role", r, sizeof(r));
+            json_get_string(role - 1, "content", c, sizeof(c));
+            if (c[0]) {
+                snprintf(messages[msg_count].text, MAX_MSG_LEN, "%s", c);
+                messages[msg_count].is_user = (strcmp(r, "user") == 0);
+                msg_count++;
+            }
+            p = role + 6;
+        }
+        free(resp);
+    }
+}
+
+static void delete_session(const char *sid) {
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "%s/api/auth/sessions/delete", server_url);
+    char body[256];
+    snprintf(body, sizeof(body), "{\"session_id\":\"%s\",\"target_session_id\":\"%s\"}", sessionId, sid);
+    char *resp = http_post(url, body);
+    if (resp) free(resp);
+    fetch_sessions();
+}
+
+/* ═══ Smart Reply Chips ═══ */
+
+static void generate_chips(const char *reply) {
+    chip_count = 0;
+    const char *lower = reply; /* Simple check — not actual lowercase but works for ASCII */
+    if (strstr(lower, "error") || strstr(lower, "Error") || strstr(lower, "fail")) {
+        snprintf(smart_chips[0], 128, "Show full error");
+        snprintf(smart_chips[1], 128, "How do I fix this?");
+        snprintf(smart_chips[2], 128, "Try a different approach");
+        chip_count = 3;
+    } else if (strstr(lower, "```") || strstr(lower, "function") || strstr(lower, "class ")) {
+        snprintf(smart_chips[0], 128, "Explain this code");
+        snprintf(smart_chips[1], 128, "Write tests for this");
+        snprintf(smart_chips[2], 128, "Optimize it");
+        chip_count = 3;
+    } else if (strstr(lower, "°F") || strstr(lower, "°C") || strstr(lower, "weather")) {
+        snprintf(smart_chips[0], 128, "Tomorrow's forecast?");
+        snprintf(smart_chips[1], 128, "Hourly breakdown");
+        snprintf(smart_chips[2], 128, "Thanks!");
+        chip_count = 3;
+    } else {
+        snprintf(smart_chips[0], 128, "Tell me more");
+        snprintf(smart_chips[1], 128, "What else can you do?");
+        snprintf(smart_chips[2], 128, "Thanks!");
+        chip_count = 3;
+    }
+}
+
+/* ═══ Clipboard (SDL2) ═══ */
+
+static void copy_to_clipboard(const char *text) {
+    SDL_SetClipboardText(text);
+}
+
+/* ═══ Context Menu Builders ═══ */
+
+static void show_user_msg_menu(int msg_idx, int x, int y) {
+    menu_hide(&ctx_menu);
+    ctx_menu.context_type = 1;
+    ctx_menu.context_index = msg_idx;
+    snprintf(ctx_menu.context_text, sizeof(ctx_menu.context_text), "%s", messages[msg_idx].text);
+    menu_add(&ctx_menu, "C", "Copy", ACT_COPY, false, false);
+    menu_add(&ctx_menu, "R", "Resend", ACT_RESEND, false, false);
+    menu_add(&ctx_menu, "M", "Resend with model...", ACT_RESEND_MODEL, false, true);
+    menu_add(&ctx_menu, "B", "Branch", ACT_BRANCH, false, false);
+    menu_show(&ctx_menu, x, y);
+}
+
+static void show_asst_msg_menu(int msg_idx, int x, int y) {
+    menu_hide(&ctx_menu);
+    ctx_menu.context_type = 2;
+    ctx_menu.context_index = msg_idx;
+    snprintf(ctx_menu.context_text, sizeof(ctx_menu.context_text), "%s", messages[msg_idx].text);
+    menu_add(&ctx_menu, "C", "Copy", ACT_COPY, false, false);
+    menu_add(&ctx_menu, "S", "Share", ACT_SHARE, false, true);
+    menu_add(&ctx_menu, "P", "Pin Message", ACT_PIN, false, false);
+    menu_add(&ctx_menu, "+", "Rate: Good", ACT_RATE_UP, false, false);
+    menu_add(&ctx_menu, "-", "Rate: Bad", ACT_RATE_DOWN, false, true);
+    menu_add(&ctx_menu, "X", "Delete", ACT_DELETE_MSG, true, false);
+    menu_show(&ctx_menu, x, y);
+}
+
+static void show_session_menu(int sess_idx, int x, int y) {
+    menu_hide(&ctx_menu);
+    ctx_menu.context_type = 3;
+    ctx_menu.context_index = sess_idx;
+    menu_add(&ctx_menu, "O", "Open", ACT_SESSION_SWITCH, false, true);
+    menu_add(&ctx_menu, "E", "Export", ACT_SESSION_EXPORT, false, false);
+    menu_add(&ctx_menu, "X", "Delete", ACT_SESSION_DELETE, true, false);
+    menu_show(&ctx_menu, x, y);
+}
+
+static void handle_menu_action(int action) {
+    switch (action) {
+    case ACT_COPY:
+        copy_to_clipboard(ctx_menu.context_text);
+        break;
+    case ACT_RESEND:
+        snprintf(input_text, sizeof(input_text), "%s", ctx_menu.context_text);
+        input_cursor = (int)strlen(input_text);
+        send_message();
+        break;
+    case ACT_NEW_CHAT:
+        new_chat();
+        break;
+    case ACT_SESSION_SWITCH:
+        if (ctx_menu.context_index >= 0 && ctx_menu.context_index < session_count) {
+            switch_session(sessions[ctx_menu.context_index].id);
+            show_session_drawer = false;
+        }
+        break;
+    case ACT_SESSION_DELETE:
+        if (ctx_menu.context_index >= 0 && ctx_menu.context_index < session_count) {
+            delete_session(sessions[ctx_menu.context_index].id);
+        }
+        break;
+    case ACT_PIN: {
+        char url[MAX_URL_LEN + 64];
+        snprintf(url, sizeof(url), "%s/api/chat/pin", server_url);
+        char body[256];
+        snprintf(body, sizeof(body), "{\"session_id\":\"%s\",\"message_index\":%d,\"content\":\"\"}",
+                 sessionId, ctx_menu.context_index);
+        char *resp = http_post(url, body);
+        if (resp) free(resp);
+        break;
+    }
+    case ACT_RATE_UP:
+    case ACT_RATE_DOWN: {
+        char url[MAX_URL_LEN + 64];
+        snprintf(url, sizeof(url), "%s/api/chat/rate", server_url);
+        char body[256];
+        snprintf(body, sizeof(body), "{\"session_id\":\"%s\",\"message_index\":%d,\"rating\":\"%s\"}",
+                 sessionId, ctx_menu.context_index,
+                 action == ACT_RATE_UP ? "thumbs_up" : "thumbs_down");
+        char *resp = http_post(url, body);
+        if (resp) free(resp);
+        break;
+    }
+    default:
+        break;
+    }
+}
+
 static void *send_message_thread(void *arg) {
     char *text = (char *)arg;
     char url[MAX_URL_LEN + 32];
@@ -423,6 +664,8 @@ static void *send_message_thread(void *arg) {
                 /* Trigger a fresh weather fetch on next frame */
                 last_weather_time = 0;
             }
+            /* Generate smart reply chips based on response content */
+            generate_chips(reply);
         }
         free(resp);
     } else {
@@ -494,11 +737,72 @@ static void draw_topbar(void) {
         draw_text(font_small, gpu, screen_w - 200, 16, COL_YELLOW);
     }
 
+    /* Session button (left of GPU) */
+    draw_rounded_rect(screen_w - 280, 8, 28, 28, 6, COL_CARD);
+    draw_text(font_small, "=", screen_w - 272, 12, COL_TEXT); /* Hamburger-ish */
+
+    /* New Chat button */
+    draw_rounded_rect(screen_w - 246, 8, 28, 28, 6, COL_ACCENT);
+    draw_text(font_small, "+", screen_w - 239, 12, (Color){10, 15, 25, 255});
+
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char timestr[32];
     strftime(timestr, sizeof(timestr), "%H:%M", t);
     draw_text(font_regular, timestr, screen_w - 70, 12, COL_DIM);
+}
+
+/* ═══ Smart Reply Chips ═══ */
+static void draw_smart_chips(void) {
+    if (chip_count == 0 || is_sending) return;
+    int kb_h = kb_get_height(&vkb);
+    int cy = screen_h - INPUT_H - kb_h - 38;
+    int cx = SIDEBAR_W + 16;
+
+    for (int i = 0; i < chip_count && i < MAX_CHIPS; i++) {
+        int tw = 0;
+        TTF_SizeUTF8(font_small, smart_chips[i], &tw, NULL);
+        int cw = tw + 24;
+        draw_rounded_rect(cx, cy, cw, 30, 15, (Color){50, 70, 120, 160});
+        draw_text(font_small, smart_chips[i], cx + 12, cy + 7, COL_ACCENT);
+        cx += cw + 8;
+    }
+}
+
+/* ═══ Session Drawer ═══ */
+#define DRAWER_W 280
+static void draw_session_drawer(void) {
+    if (!show_session_drawer) return;
+    /* Overlay */
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    fill_rect(0, 0, screen_w, screen_h, (Color){0, 0, 0, 120});
+
+    /* Drawer panel from left */
+    fill_rect(0, 0, DRAWER_W, screen_h, COL_SURFACE);
+    fill_rect(DRAWER_W - 1, 0, 1, screen_h, COL_BORDER);
+
+    /* Header */
+    draw_text(font_large, "Sessions", 16, 14, COL_ACCENT);
+    draw_rounded_rect(DRAWER_W - 48, 10, 32, 28, 6, COL_ACCENT);
+    draw_text(font_small, "+", DRAWER_W - 38, 14, (Color){10, 15, 25, 255});
+
+    fill_rect(0, 48, DRAWER_W, 1, COL_BORDER);
+
+    /* Session list */
+    int y = 56;
+    for (int i = 0; i < session_count && y < screen_h - 20; i++) {
+        bool active = (strcmp(sessions[i].id, sessionId) == 0);
+        Color bg = active ? (Color){50, 65, 90, 200} : (Color){0, 0, 0, 0};
+        if (active) fill_rect(0, y, DRAWER_W - 1, 48, bg);
+
+        draw_text(font_regular, sessions[i].title, 16, y + 6, active ? COL_WHITE : COL_TEXT);
+        char info[64];
+        snprintf(info, sizeof(info), "%d msgs", sessions[i].message_count);
+        draw_text(font_small, info, 16, y + 28, COL_DIM);
+
+        fill_rect(16, y + 47, DRAWER_W - 32, 1, COL_BORDER);
+        y += 48;
+    }
 }
 
 static void draw_weather_widget(int x, int y, int w) {
@@ -850,6 +1154,65 @@ static void handle_touch(int x, int y) {
         return;
     }
 
+    /* Topbar buttons */
+    if (y < TOPBAR_H) {
+        /* Session drawer button */
+        if (x >= screen_w - 280 && x <= screen_w - 252) {
+            show_session_drawer = !show_session_drawer;
+            if (show_session_drawer) fetch_sessions();
+            return;
+        }
+        /* New chat button */
+        if (x >= screen_w - 246 && x <= screen_w - 218) {
+            new_chat();
+            return;
+        }
+        return;
+    }
+
+    /* Smart reply chip taps */
+    if (chip_count > 0 && !is_sending) {
+        int kb_h = kb_get_height(&vkb);
+        int cy = screen_h - INPUT_H - kb_h - 38;
+        int cx = SIDEBAR_W + 16;
+        for (int i = 0; i < chip_count && i < MAX_CHIPS; i++) {
+            int tw = 0;
+            TTF_SizeUTF8(font_small, smart_chips[i], &tw, NULL);
+            int cw = tw + 24;
+            if (x >= cx && x <= cx + cw && y >= cy && y <= cy + 30) {
+                snprintf(input_text, sizeof(input_text), "%s", smart_chips[i]);
+                input_cursor = (int)strlen(input_text);
+                chip_count = 0;
+                send_message();
+                return;
+            }
+            cx += cw + 8;
+        }
+    }
+
+    /* Long-press on chat bubbles → context menu */
+    if (x > SIDEBAR_W && y > TOPBAR_H && y < screen_h - INPUT_H) {
+        Uint32 held = SDL_GetTicks() - touch_down_time;
+        if (held > LONG_PRESS_MS && touch_down_time > 0 && !long_press_fired) {
+            /* Find which message bubble was long-pressed */
+            int by_scan = TOPBAR_H + 16 - scroll_offset;
+            for (int i = 0; i < msg_count; i++) {
+                /* Rough height estimate per message */
+                int est_h = 60 + (int)(strlen(messages[i].text) / 60) * 18;
+                if (y >= by_scan && y < by_scan + est_h) {
+                    if (messages[i].is_user) {
+                        show_user_msg_menu(i, x, y);
+                    } else {
+                        show_asst_msg_menu(i, x, y);
+                    }
+                    long_press_fired = true;
+                    return;
+                }
+                by_scan += est_h + 14;
+            }
+        }
+    }
+
     /* Sidebar touches */
     if (x < SIDEBAR_W) {
         /* Weather widget tap — refresh now */
@@ -1116,11 +1479,71 @@ int main(int argc, char *argv[]) {
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) { running = false; break; }
 
-            /* Escape key: hide keyboard or quit */
+            /* Escape key: dismiss menus/drawers/keyboard, or quit */
             if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) {
-                if (vkb.visible) { kb_hide(&vkb); }
+                if (ctx_menu.visible) { menu_hide(&ctx_menu); }
+                else if (show_session_drawer) { show_session_drawer = false; }
+                else if (vkb.visible) { kb_hide(&vkb); }
                 else if (input_active) { input_active = false; }
                 else { running = false; }
+                continue;
+            }
+
+            /* Context menu consumes events when visible */
+            if (ctx_menu.visible) {
+                int action = menu_handle_event(&ctx_menu, &event, screen_w, screen_h);
+                if (action >= 0) handle_menu_action(action);
+                continue;
+            }
+
+            /* Track long-press for context menus */
+            if (event.type == SDL_MOUSEBUTTONDOWN || event.type == SDL_FINGERDOWN) {
+                if (event.type == SDL_FINGERDOWN) {
+                    touch_down_x = (int)(event.tfinger.x * screen_w);
+                    touch_down_y = (int)(event.tfinger.y * screen_h);
+                } else {
+                    touch_down_x = event.button.x;
+                    touch_down_y = event.button.y;
+                }
+                touch_down_time = SDL_GetTicks();
+                long_press_fired = false;
+            }
+            if (event.type == SDL_MOUSEBUTTONUP || event.type == SDL_FINGERUP) {
+                touch_down_time = 0;
+            }
+
+            /* Session drawer touches */
+            if (show_session_drawer) {
+                int tx = -1, ty = -1;
+                if (event.type == SDL_MOUSEBUTTONDOWN) { tx = event.button.x; ty = event.button.y; }
+                else if (event.type == SDL_FINGERDOWN) { tx = (int)(event.tfinger.x * screen_w); ty = (int)(event.tfinger.y * screen_h); }
+                if (tx >= 0) {
+                    if (tx > DRAWER_W) {
+                        show_session_drawer = false;
+                    } else {
+                        /* New chat button in drawer */
+                        if (tx >= DRAWER_W - 48 && tx <= DRAWER_W - 16 && ty >= 10 && ty <= 38) {
+                            new_chat();
+                            show_session_drawer = false;
+                        }
+                        /* Session item tap/long-press */
+                        int sy = 56;
+                        for (int i = 0; i < session_count; i++) {
+                            if (ty >= sy && ty < sy + 48) {
+                                Uint32 held = SDL_GetTicks() - touch_down_time;
+                                if (held > LONG_PRESS_MS && !long_press_fired) {
+                                    show_session_menu(i, tx, ty);
+                                    long_press_fired = true;
+                                } else {
+                                    switch_session(sessions[i].id);
+                                    show_session_drawer = false;
+                                }
+                                break;
+                            }
+                            sy += 48;
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -1278,8 +1701,11 @@ int main(int argc, char *argv[]) {
             draw_topbar();
             draw_sidebar();
             draw_chat();
+            draw_smart_chips();
             draw_input_bar();
             kb_render(&vkb, renderer, font_regular, font_small, screen_w, screen_h);
+            draw_session_drawer();
+            menu_render(&ctx_menu, renderer, font_regular, font_small);
         }
 
         SDL_RenderPresent(renderer);
