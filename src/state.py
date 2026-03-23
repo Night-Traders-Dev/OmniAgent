@@ -2,12 +2,12 @@ import os
 import json
 import uuid
 import threading
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from src.config import SESSION_FILE
 
 
 class ChatReq(BaseModel):
-    message: str
+    message: str = Field(..., max_length=100_000)  # 100KB max enforced at model level
     tool_flags: dict | None = None
     model_override: str | None = None
     session_id: str | None = None

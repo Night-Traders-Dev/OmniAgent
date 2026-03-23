@@ -1364,6 +1364,53 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun loadScheduledTasks() {
+        viewModelScope.launch {
+            try {
+                val r = okhttp3.Request.Builder().url("${api.baseUrl}/api/schedules?session_id=${api.sessionId}").build()
+                val resp = okhttp3.OkHttpClient.Builder().build().newCall(r).execute()
+                val body = resp.body?.string() ?: "{}"
+                val obj = com.google.gson.Gson().fromJson(body, com.google.gson.JsonObject::class.java)
+                val tasks = obj.getAsJsonArray("schedules")
+                val lines = mutableListOf<String>()
+                if (tasks != null && tasks.size() > 0) {
+                    for (i in 0 until tasks.size()) {
+                        val t = tasks.get(i).asJsonObject
+                        val desc = t.get("description")?.asString ?: "Untitled"
+                        val interval = t.get("interval")?.asString ?: "?"
+                        val nextRun = t.get("next_run")?.asString ?: ""
+                        val enabled = t.get("enabled")?.asBoolean ?: true
+                        val status = if (enabled) "active" else "paused"
+                        lines.add("[$status] $desc — every $interval (next: $nextRun)")
+                    }
+                } else {
+                    lines.add("No scheduled tasks. Use 'Run X every day/hourly/weekly' to create one.")
+                }
+                _state.update { s -> s.copy(reasoningHistory = lines, showReasoningHistory = true) }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun exportAllData() {
+        viewModelScope.launch {
+            try {
+                val r = okhttp3.Request.Builder()
+                    .url("${api.baseUrl}/api/export/all?session_id=${api.sessionId}")
+                    .build()
+                val resp = okhttp3.OkHttpClient.Builder().build().newCall(r).execute()
+                val body = resp.body?.string() ?: "{}"
+                // Save to Downloads
+                val filename = "omniagent_export_${System.currentTimeMillis()}.json"
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                val file = java.io.File(dir, filename)
+                file.writeText(body)
+                _state.update { s -> s.copy(error = "Data exported to Downloads/$filename") }
+            } catch (e: Exception) {
+                _state.update { s -> s.copy(error = "Export failed: ${e.message}") }
+            }
+        }
+    }
+
     // --- Reasoning History ---
 
     fun loadReasoningHistory() {

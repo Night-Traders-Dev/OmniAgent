@@ -289,7 +289,8 @@ async def login(request: Request, req: AuthReq):
     })
 
 @app.get("/api/auth/user")
-async def get_current_user(session_id: str = "default"):
+@limiter.limit("30/minute")
+async def get_current_user(request: Request, session_id: str = "default"):
     user = get_session_user(session_id)
     if not user:
         return JSONResponse({"authenticated": False})
@@ -868,27 +869,27 @@ async def _process_chat(request: Request, req: ChatReq, sid: str):
             pins_ctx = get_pinned_context(sid)
             if pins_ctx:
                 memory_context += pins_ctx + "\n\n"
-        except Exception:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger("omniagent").debug(f"Pinned context error: {e}")
         # Inject user preferences
         try:
             from src.features import get_preference_context
             prefs_ctx = get_preference_context(user["id"])
             if prefs_ctx:
                 memory_context += prefs_ctx + "\n\n"
-        except Exception:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger("omniagent").debug(f"Preference context error: {e}")
         # Learn from corrections
         try:
             from src.features import learn_from_correction
             learn_from_correction(user["id"], req.message)
-        except Exception:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger("omniagent").debug(f"Correction learning error: {e}")
         try:
             from src.memory import recall_as_context
             memory_context += recall_as_context(user["id"])
-        except Exception:
-            pass
+        except Exception as e:
+            import logging; logging.getLogger("omniagent").debug(f"Memory recall error: {e}")
 
     # Inject location context if available — or flag that it's needed
     loc = _user_location.get(sid, {})
@@ -1041,6 +1042,14 @@ async def upload_file(request: Request, file: UploadFile = File(...), session_id
     content = await file.read()
     if len(content) > MAX_UPLOAD_SIZE:
         return JSONResponse({"error": f"File too large (max {MAX_UPLOAD_SIZE // 1024 // 1024}MB)"}, status_code=413)
+    # Per-user quota: max 100MB per user
+    user_quota_mb = 100
+    try:
+        user_total = sum(f.stat().st_size for f in UPLOAD_DIR.iterdir() if f.is_file())
+        if user_total + len(content) > user_quota_mb * 1024 * 1024:
+            return JSONResponse({"error": f"Upload quota exceeded ({user_quota_mb}MB). Delete some files."}, status_code=507)
+    except Exception:
+        pass
     dest = UPLOAD_DIR / safe_name
     with open(dest, "wb") as f:
         f.write(content)
@@ -1377,6 +1386,59 @@ async def export_chat(fmt: str, session_id: str = ""):
         return JSONResponse({"error": f"Unknown format: {fmt}"}, status_code=400)
     fn, media, filename = exporters[fmt]
     return PlainTextResponse(fn(history), media_type=media, headers={"Content-Disposition": f"attachment; filename={filename}"})
+
+@app.get("/api/export/all")
+async def export_all_user_data(session_id: str = ""):
+    """GDPR-style bulk export — all user data as JSON."""
+    user = get_session_user(session_id)
+    if not user:
+        return JSONResponse({"error": "Authentication required"}, status_code=401)
+    import json as _json
+    from src.persistence import get_db, decrypt
+    conn = get_db()
+    try:
+        # All sessions
+        sessions = conn.execute(
+            "SELECT id, title, last_active, is_shared FROM sessions WHERE user_id = ?",
+            (user["id"],)
+        ).fetchall()
+        # All messages (decrypted)
+        messages = []
+        for sess in sessions:
+            rows = conn.execute(
+                "SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY id",
+                (sess[0],)
+            ).fetchall()
+            for row in rows:
+                try:
+                    content = decrypt(row[1])
+                except Exception:
+                    content = "[encrypted]"
+                messages.append({"session_id": sess[0], "role": row[0], "content": content, "created_at": row[2]})
+        # Preferences
+        prefs = conn.execute(
+            "SELECT category, key, value FROM user_preferences WHERE user_id = ?",
+            (user["id"],)
+        ).fetchall()
+        # Memories
+        memories = conn.execute(
+            "SELECT category, key, value FROM agent_memory WHERE user_id = ?",
+            (user["id"],)
+        ).fetchall()
+    finally:
+        conn.close()
+
+    export = {
+        "user": {"id": user["id"], "username": user["username"]},
+        "exported_at": __import__("datetime").datetime.now().isoformat(),
+        "sessions": [{"id": s[0], "title": s[1], "last_active": s[2], "shared": bool(s[3])} for s in sessions],
+        "messages": messages,
+        "preferences": [{"category": p[0], "key": p[1], "value": p[2]} for p in prefs],
+        "memories": [{"category": m[0], "key": m[1], "value": m[2]} for m in memories],
+    }
+    content = _json.dumps(export, indent=2, default=str)
+    return PlainTextResponse(content, media_type="application/json",
+                             headers={"Content-Disposition": "attachment; filename=omniagent_full_export.json"})
 
 
 # --- Integrations (GitHub, Google Drive, Google Keep/Tasks) ---

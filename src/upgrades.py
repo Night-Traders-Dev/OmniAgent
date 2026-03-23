@@ -189,6 +189,25 @@ def cleanup_expired_sessions():
             del state._sessions[sid]
         if expired:
             log.info(f"Cleaned up {len(expired)} idle sessions")
+        # Also clean up DB sessions older than 30 days with no messages
+        try:
+            from src.persistence import get_db
+            conn = get_db()
+            try:
+                result = conn.execute("""
+                    DELETE FROM sessions WHERE id IN (
+                        SELECT s.id FROM sessions s
+                        LEFT JOIN chat_messages m ON m.session_id = s.id
+                        WHERE m.id IS NULL AND s.last_active < datetime('now', '-30 days')
+                    )
+                """)
+                if result.rowcount > 0:
+                    conn.commit()
+                    log.info(f"Cleaned up {result.rowcount} stale DB sessions")
+            finally:
+                conn.close()
+        except Exception:
+            pass
     except Exception:
         pass
 

@@ -25,8 +25,17 @@ log = logging.getLogger("features")
 # 1. Cross-Session Conversation Search
 # ============================================================
 
+_search_cache: dict[str, tuple] = {}  # key → (timestamp, results)
+_SEARCH_CACHE_TTL = 120  # 2 minutes
+
 def search_all_conversations(user_id: int, query: str, limit: int = 20) -> list[dict]:
-    """Full-text search across ALL sessions for a user."""
+    """Full-text search across ALL sessions for a user. Results cached for 2 min."""
+    import time as _time
+    cache_key = f"{user_id}:{query}:{limit}"
+    cached = _search_cache.get(cache_key)
+    if cached and _time.time() - cached[0] < _SEARCH_CACHE_TTL:
+        return cached[1]
+
     from src.persistence import get_db, decrypt
     conn = get_db()
     try:
@@ -60,6 +69,12 @@ def search_all_conversations(user_id: int, query: str, limit: int = 20) -> list[
                     break
         except Exception:
             continue
+    # Cache results
+    _search_cache[cache_key] = (_time.time(), results)
+    # Evict old cache entries
+    if len(_search_cache) > 50:
+        oldest_key = min(_search_cache, key=lambda k: _search_cache[k][0])
+        _search_cache.pop(oldest_key, None)
     return results
 
 
@@ -435,6 +450,7 @@ def end_trace(trace_id: str) -> dict:
         return {}
     trace["elapsed"] = f"{time.time() - trace['start_time']:.1f}s"
     trace["estimated_cost"] = _estimate_cost(trace["total_tokens_in"], trace["total_tokens_out"])
+    _persist_trace(trace)
     return trace
 
 
@@ -449,9 +465,17 @@ def _estimate_cost(tokens_in: int, tokens_out: int) -> str:
     return f"~${total:.2f}"
 
 
+_completed_traces: list[dict] = []
+
+def _persist_trace(trace: dict):
+    """Store completed trace in memory ring buffer (last 100)."""
+    _completed_traces.append(trace)
+    if len(_completed_traces) > 100:
+        _completed_traces.pop(0)
+
 def get_recent_traces(limit: int = 20) -> list[dict]:
-    """Get recent completed traces (from memory — not persisted)."""
-    return []  # TODO: persist traces to DB
+    """Get recent completed traces."""
+    return _completed_traces[-limit:]
 
 
 # ============================================================

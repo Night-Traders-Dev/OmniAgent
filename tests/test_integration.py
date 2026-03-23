@@ -502,5 +502,119 @@ class TestExperiments:
         assert isinstance(tree["nodes"], list)
 
 
+# ============================================================
+# Audit Fix Tests
+# ============================================================
+
+class TestAuditFixes:
+    """Tests for issues found in the codebase audit."""
+
+    def test_invite_code_system(self):
+        from src.web import _get_valid_invite_codes, _create_invite_code
+        codes = _get_valid_invite_codes()
+        assert len(codes) >= 1  # Master code always present
+        new_code = _create_invite_code()
+        assert len(new_code) == 8
+        codes2 = _get_valid_invite_codes()
+        assert new_code in codes2
+
+    def test_register_requires_invite(self):
+        """Registration without invite code should fail."""
+        from src.persistence import get_db
+        conn = get_db()
+        try:
+            # Ensure no user 'audit_test_user' exists
+            conn.execute("DELETE FROM users WHERE username = 'audit_test_user'")
+            conn.commit()
+        finally:
+            conn.close()
+        from fastapi.testclient import TestClient
+        from src.web import app
+        client = TestClient(app)
+        r = client.post("/api/auth/register", json={"username": "audit_test_user", "password": "test123456", "invite_code": ""})
+        assert r.status_code == 403
+
+    def test_register_with_valid_invite(self):
+        from src.web import _create_invite_code
+        code = _create_invite_code()
+        from src.persistence import get_db
+        conn = get_db()
+        try:
+            conn.execute("DELETE FROM users WHERE username = 'audit_test_user2'")
+            conn.commit()
+        finally:
+            conn.close()
+        from fastapi.testclient import TestClient
+        from src.web import app
+        client = TestClient(app)
+        r = client.post("/api/auth/register", json={"username": "audit_test_user2", "password": "test123456", "invite_code": code})
+        assert r.status_code == 200
+        assert r.json().get("ok") is True
+
+    def test_ssrf_blocks_cloud_metadata(self):
+        from src.tools import _is_ssrf_target
+        assert _is_ssrf_target("http://169.254.169.254/latest/meta-data/") is not None
+        assert _is_ssrf_target("http://metadata.google.internal/computeMetadata/v1/") is not None
+        assert _is_ssrf_target("http://[::1]:8080/secret") is not None
+        assert _is_ssrf_target("http://127.1/admin") is not None
+
+    def test_ssrf_allows_valid_urls(self):
+        from src.tools import _is_ssrf_target
+        assert _is_ssrf_target("https://example.com") is None
+        assert _is_ssrf_target("https://api.github.com/repos") is None
+
+    def test_login_lockout(self):
+        from src.upgrades import check_login_lockout, record_failed_login, clear_login_attempts
+        username = "_audit_lockout_test"
+        clear_login_attempts(username)
+        assert not check_login_lockout(username)
+        for _ in range(10):
+            record_failed_login(username)
+        assert check_login_lockout(username)
+        clear_login_attempts(username)
+        assert not check_login_lockout(username)
+
+    def test_traces_persist(self):
+        from src.features import start_trace, trace_event, end_trace, get_recent_traces
+        tid = start_trace("test_session", "test message")
+        trace_event(tid, "test_event", tokens_in=10, tokens_out=20)
+        result = end_trace(tid)
+        assert result["total_tokens_in"] == 10
+        traces = get_recent_traces(5)
+        assert len(traces) >= 1
+        assert traces[-1]["total_tokens_in"] == 10
+
+    def test_search_cache(self):
+        from src.features import _search_cache
+        # Cache should exist as a dict
+        assert isinstance(_search_cache, dict)
+
+    def test_chatreq_max_length(self):
+        from src.state import ChatReq
+        import pytest
+        from pydantic import ValidationError
+        # Normal message should work
+        req = ChatReq(message="hello")
+        assert req.message == "hello"
+        # Over 100KB should fail
+        with pytest.raises(ValidationError):
+            ChatReq(message="x" * 100_001)
+
+    def test_version_dynamic(self):
+        from src.config import VERSION
+        from fastapi.testclient import TestClient
+        from src.web import app
+        client = TestClient(app)
+        r = client.get("/api/version")
+        assert r.text.strip() == VERSION
+
+    def test_bulk_export_requires_auth(self):
+        from fastapi.testclient import TestClient
+        from src.web import app
+        client = TestClient(app)
+        r = client.get("/api/export/all?session_id=invalid_session")
+        assert r.status_code in (401, 400)  # Unauthenticated request rejected
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "--tb=short"])

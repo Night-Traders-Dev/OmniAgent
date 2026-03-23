@@ -386,6 +386,10 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
                 Spacer(Modifier.height(4.dp))
                 SettingsButton("Long-Running Tasks", Accent) { vm.loadTaskHistory() }
                 Spacer(Modifier.height(4.dp))
+                SettingsButton("Scheduled Tasks", Accent) { vm.loadScheduledTasks() }
+                Spacer(Modifier.height(4.dp))
+                SettingsButton("Export All My Data", GreenDark) { vm.exportAllData() }
+                Spacer(Modifier.height(4.dp))
                 SettingsButton("Conversation Tree", Accent) { vm.loadConversationTree() }
                 Spacer(Modifier.height(8.dp))
                 // Global search
