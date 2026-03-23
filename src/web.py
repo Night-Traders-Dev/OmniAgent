@@ -1756,10 +1756,63 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
 
 # --- MCP Server ---
 
+# --- MCP Protocol (JSON-RPC 2.0 over HTTP + legacy REST) ---
+
+# Stateful MCP session handler (one per server lifetime for HTTP transport)
+_mcp_handler = None
+def _get_mcp_handler():
+    global _mcp_handler
+    if _mcp_handler is None:
+        from src.mcp import MCPProtocolHandler
+        _mcp_handler = MCPProtocolHandler()
+    return _mcp_handler
+
+@app.post("/mcp")
+async def mcp_jsonrpc(request: Request):
+    """MCP JSON-RPC 2.0 endpoint — handles all MCP methods over HTTP.
+    Clients POST JSON-RPC messages here (initialize, tools/list, tools/call, etc.)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}})
+    handler = _get_mcp_handler()
+
+    # Support batch requests
+    if isinstance(body, list):
+        responses = []
+        for msg in body:
+            resp = handler.handle_message(msg)
+            if resp is not None:
+                responses.append(resp)
+        return JSONResponse(responses)
+
+    response = handler.handle_message(body)
+    if response is None:
+        return JSONResponse({"jsonrpc": "2.0", "result": "ok"})
+    return JSONResponse(response)
+
+@app.get("/mcp/sse")
+async def mcp_sse_stream(request: Request):
+    """MCP SSE transport — server pushes events, client sends via POST /mcp."""
+    from src.mcp import SERVER_INFO, SERVER_CAPABILITIES
+    async def event_stream():
+        # Send endpoint URL for client to POST to
+        yield f"event: endpoint\ndata: /mcp\n\n"
+        # Keep connection alive
+        while True:
+            await asyncio.sleep(15)
+            yield f": keepalive\n\n"
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+# Legacy REST endpoints (preserved for backward compatibility)
 @app.get("/mcp/manifest")
 async def mcp_manifest():
-    from src.platform import mcp_server
-    return JSONResponse(mcp_server.get_manifest())
+    """Legacy: GET the tool manifest. Prefer POST /mcp with tools/list."""
+    handler = _get_mcp_handler()
+    result = handler._handle_tools_list({})
+    from src.mcp import SERVER_INFO
+    return JSONResponse({"name": SERVER_INFO["name"], "version": SERVER_INFO["version"],
+                         "protocol": "mcp/1.0", "tools": result["tools"]})
 
 class MCPToolReq(BaseModel):
     tool: str
@@ -1767,9 +1820,10 @@ class MCPToolReq(BaseModel):
 
 @app.post("/mcp/execute")
 async def mcp_execute(req: MCPToolReq):
-    from src.platform import mcp_server
-    result = mcp_server.execute_tool(req.tool, req.args)
-    return JSONResponse(result)
+    """Legacy: Execute a tool. Prefer POST /mcp with tools/call."""
+    handler = _get_mcp_handler()
+    result = handler._handle_tools_call({"name": req.tool, "arguments": req.args})
+    return JSONResponse({"tool": req.tool, "result": result["content"][0]["text"], "isError": result.get("isError", False)})
 
 
 # --- Notification Config ---
@@ -1874,7 +1928,7 @@ async def api_server_status():
     """Comprehensive server status for all subsystems."""
     from src.config import BITNET_ENABLED, EXPERTS, OLLAMA_NUM_CTX
     status = {
-        "version": "8.4.1",
+        "version": "8.5.0",
         "server": "running",
         "ollama": False,
         "bitnet": BITNET_ENABLED,
@@ -2231,18 +2285,76 @@ async def api_cleanup_worktree(req: WorktreeReq):
 
 # --- MCP Servers ---
 
+# --- MCP Client Management (connect to external MCP servers) ---
+
 @app.get("/api/mcp/servers")
 async def api_mcp_servers():
-    return JSONResponse({"servers": list_mcp_servers()})
+    """List all connected external MCP servers and their tools."""
+    from src.mcp import list_mcp_clients
+    return JSONResponse({"servers": list_mcp_clients()})
 
+class MCPRegisterStdio(BaseModel):
+    name: str
+    command: list[str]
+    env: dict = {}
+
+@app.post("/api/mcp/register/stdio")
+async def api_register_mcp_stdio(req: MCPRegisterStdio):
+    """Connect to an external MCP server via stdio (launches subprocess)."""
+    from src.mcp import register_mcp_server_stdio
+    result = await register_mcp_server_stdio(req.name, req.command, req.env or None)
+    return JSONResponse(result)
+
+class MCPRegisterSSE(BaseModel):
+    name: str
+    url: str
+
+@app.post("/api/mcp/register/sse")
+async def api_register_mcp_sse(req: MCPRegisterSSE):
+    """Connect to an external MCP server via SSE/HTTP transport."""
+    from src.mcp import register_mcp_server_sse
+    result = await register_mcp_server_sse(req.name, req.url)
+    return JSONResponse(result)
+
+# Legacy endpoint for backward compatibility
 class MCPReq(BaseModel):
     name: str
     url: str
 
 @app.post("/api/mcp/register")
 async def api_register_mcp(req: MCPReq):
-    result = register_mcp_server(req.name, req.url)
+    """Legacy: register via URL (auto-detects transport)."""
+    from src.mcp import register_mcp_server_sse
+    result = await register_mcp_server_sse(req.name, req.url)
     return JSONResponse(result)
+
+class MCPCallReq(BaseModel):
+    server: str
+    tool: str
+    arguments: dict = {}
+
+@app.post("/api/mcp/call")
+async def api_mcp_call_tool(req: MCPCallReq):
+    """Call a tool on a connected external MCP server."""
+    from src.mcp import call_mcp_tool
+    result = await call_mcp_tool(req.server, req.tool, req.arguments)
+    return JSONResponse({"result": result, "isError": "ERROR" in result})
+
+class MCPDisconnectReq(BaseModel):
+    name: str
+
+@app.post("/api/mcp/disconnect")
+async def api_mcp_disconnect(req: MCPDisconnectReq):
+    """Disconnect from an external MCP server."""
+    from src.mcp import disconnect_mcp_server
+    result = await disconnect_mcp_server(req.name)
+    return JSONResponse(result)
+
+@app.get("/api/mcp/tools")
+async def api_mcp_all_tools():
+    """List all tools from all connected external MCP servers."""
+    from src.mcp import get_all_mcp_tools
+    return JSONResponse({"tools": get_all_mcp_tools()})
 
 
 # --- Upload management ---

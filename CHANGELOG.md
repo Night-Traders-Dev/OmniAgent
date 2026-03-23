@@ -1,6 +1,28 @@
 # OmniAgent Changelog
 
-## v8.4.1 — 2026-03-23 (Current)
+## v8.5.0 — 2026-03-23 (Current)
+
+### Full MCP (Model Context Protocol) Support
+
+- **MCP Server (stdio)** — `mcp_server.py` entry point for Claude Desktop, Claude Code, and any MCP client. JSON-RPC 2.0 over stdin/stdout
+- **MCP Server (SSE/HTTP)** — `POST /mcp` JSON-RPC endpoint + `GET /mcp/sse` SSE stream for web-based MCP clients
+- **46 typed tool schemas** — Every tool has proper JSON Schema with typed parameters (integer, boolean, array, string), required fields, defaults, and descriptions
+- **4 resources** — `omniagent://config`, `omniagent://metrics`, `omniagent://agents`, `omniagent://tools` — queryable by MCP clients
+- **6 prompts** — Code Review, Explain Code, Write Tests, Debug, Refactor, Security Audit — with typed arguments
+- **Auto-completion** — Tool names, resource URIs, and prompt names complete on partial input
+- **MCP Client** — Connect to external MCP servers via stdio (subprocess) or SSE/HTTP transport
+- **Tool discovery** — External server tools auto-discovered and available to agents via `server__tool` naming
+- **Agent integration** — Agents can call external MCP tools seamlessly through the existing tool framework
+- **Batch JSON-RPC** — POST an array of messages for batch processing
+- **7 new API endpoints** — `/api/mcp/register/stdio`, `/api/mcp/register/sse`, `/api/mcp/call`, `/api/mcp/disconnect`, `/api/mcp/tools`, plus legacy compatibility
+- **41 MCP tests** — Full coverage of schemas, protocol, resources, prompts, completion, routing
+
+### Agent Tool Awareness
+
+- **10,118-char tool reference** — All 47 tools with JSON call examples injected into every tool-using agent
+- **Upgraded dispatch prompt** — Orchestrator now knows each agent's model, tool count, and complete tool list
+- **Specialist prompts** — Each agent (coder, researcher, planner, tool_user, reasoner) has detailed guidance on which tools to use and when
+- **Version corrected** — Environment context now says "v8.5.0" with "47 tools and 7 specialist agents"
 
 ### NPU Full Pipeline Integration
 
@@ -9,6 +31,10 @@
 - **Server-side NPU hint parsing** — `[npu:intent=X,mood=Y]` prefix stripped from messages and injected as routing context; server skips redundant classification
 - **NPU fast-route in orchestrator** — When NPU pre-classifies intent (code→coder, debug→coder, question→researcher, summarize→reasoner, greeting→fast), orchestrator routes instantly without LLM planning step
 - **End-to-end NPU pipeline**: Query rewrite → intent classify → sentiment → server hint → fast route → response summarize → smart replies — all on-device via Gemini Nano
+
+### Testing
+
+- **396 tests** — All passing (was 319)
 
 ---
 

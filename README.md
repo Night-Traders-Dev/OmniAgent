@@ -1,4 +1,4 @@
-# OmniAgent v8.4.1
+# OmniAgent v8.5.0
 
 **Fully local, autonomous AI agent framework** — 47 tools, 7 specialist agents, multi-phase task execution, running entirely on your hardware with no cloud API keys required.
 
@@ -128,6 +128,52 @@ DEV=1 python omni_agent.py
 - **Task queue** — "Do X, then Y, then Z" with priorities
 - **Scheduled tasks** — Cron-style: "daily", "hourly", "30m", "weekly"
 
+## MCP (Model Context Protocol)
+
+OmniAgent is a full MCP server **and** client — it can expose its 47 tools to Claude Desktop/Code, and connect to external MCP servers to import their tools.
+
+### As MCP Server (expose tools to Claude)
+
+**stdio transport** (Claude Desktop / Claude Code):
+
+```bash
+# Claude Code:
+claude mcp add omniagent python /path/to/OmniAgent/mcp_server.py
+
+# Claude Desktop (~/.config/claude/claude_desktop_config.json):
+{
+  "mcpServers": {
+    "omniagent": {
+      "command": "python",
+      "args": ["/path/to/OmniAgent/mcp_server.py"]
+    }
+  }
+}
+```
+
+**HTTP transport** (web-based MCP clients):
+
+```bash
+# JSON-RPC endpoint:
+curl -X POST http://localhost:8000/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+### As MCP Client (import external tools)
+
+```bash
+# Connect to an external MCP server via stdio:
+curl -X POST http://localhost:8000/api/mcp/register/stdio \
+  -d '{"name": "filesystem", "command": ["npx", "-y", "@modelcontextprotocol/server-filesystem", "/tmp"]}'
+
+# Connect via SSE/HTTP:
+curl -X POST http://localhost:8000/api/mcp/register/sse \
+  -d '{"name": "remote", "url": "http://other-server:3000/mcp"}'
+```
+
+External tools are automatically available to all agents via `server__tool` naming.
+
 ## GPU Worker (Second PC)
 
 Offload image generation, video generation, and result verification to a second machine.
@@ -167,6 +213,7 @@ OmniAgent/
 │   ├── multimodal.py      # Vision, image gen, TTS, STT
 │   ├── tts_preprocessor.py# Text normalization for natural speech
 │   ├── oauth.py           # GitHub/Google OAuth2 flows
+│   ├── mcp.py             # MCP protocol (server + client, stdio + SSE)
 │   ├── gpu_client.py      # GPU worker discovery + E2E encryption
 │   ├── memory.py          # Agent long-term memory
 │   ├── code_intel.py      # Symbol extraction, dependency graphs
@@ -188,7 +235,8 @@ OmniAgent/
 ├── Dockerfile             # Container image
 ├── omniagent.service      # systemd auto-start
 ├── setup-gpu-worker-wsl.ps1  # Windows WSL2 setup script
-├── CHANGELOG.md           # Full version history (v7.0 → v8.4.1)
+├── mcp_server.py          # MCP stdio server (for Claude Desktop/Code)
+├── CHANGELOG.md           # Full version history (v7.0 → v8.5)
 └── .gitignore             # Comprehensive exclusions
 ```
 

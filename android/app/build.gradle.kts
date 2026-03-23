@@ -12,8 +12,8 @@ android {
         applicationId = "com.omniagent.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "8.4.1"
+        versionCode = 7
+        versionName = "8.5.0"
     }
 
     buildTypes {

@@ -1,4 +1,4 @@
-# OmniAgent v8.4.1 — Documentation
+# OmniAgent v8.5.0 — Documentation
 
 ## Guides
 
@@ -30,9 +30,9 @@ Desktop:    Tauri (Rust + WebView, 9.3MB binary, deb + rpm)
 VS Code:    Extension scaffold (Ask, Explain, Fix, Review)
 Tools:      47 registered, all with explicit timeouts
 Agents:     7 specialists (Reasoner, Coder, Researcher, Planner, ToolUser, Security, Fast)
-Endpoints:  148 REST + 1 WebSocket
+Endpoints:  155 REST + 1 WebSocket + 1 MCP JSON-RPC
 DB Tables:  14 (SQLite with Fernet encryption)
-Tests:      319 total (88 integration, all passing)
+Tests:      396 total (all passing)
 Platforms:  4 (WebUI, Android, Linux Desktop, VS Code)
 On-device:  Gemini Nano (S24/S25/Pixel 8+) + TFLite NNAPI fallback
 ```

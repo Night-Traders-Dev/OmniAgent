@@ -390,13 +390,13 @@ class TestFeatures:
 # ============================================================
 
 class TestPlatform:
-    def test_mcp_manifest(self):
+    def test_mcp_legacy_manifest(self):
         from src.platform import mcp_server
         manifest = mcp_server.get_manifest()
         assert manifest["name"] == "omniagent"
         assert len(manifest["tools"]) >= 46
 
-    def test_mcp_execute(self):
+    def test_mcp_legacy_execute(self):
         from src.platform import mcp_server
         result = mcp_server.execute_tool("python_eval", {"expression": "3 * 7"})
         assert "21" in result["result"]

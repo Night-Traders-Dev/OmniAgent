@@ -973,9 +973,212 @@ TOOL_REGISTRY = {
     "network_info": {"fn": "network_info", "description": "Show network interfaces and IP addresses", "args": ""},
 }
 
+# ============================================================
+# Comprehensive tool reference — injected into agent prompts
+# ============================================================
+
+TOOL_DETAILED_REFERENCE = """
+=== COMPLETE TOOL REFERENCE (47 tools) ===
+All tool calls use JSON format: {"tool": "name", "args": {...}, "reasoning": "why"}
+
+── FILE READING ──────────────────────────────────────────
+read       Read a file's contents. For large files, use offset/limit to read specific sections.
+           {"tool": "read", "args": {"path": "src/main.py"}}
+           {"tool": "read", "args": {"path": "data.log", "offset": 100, "limit": 50}}
+
+glob       Find files matching a glob pattern. Use ** for recursive. Returns list of matching paths.
+           {"tool": "glob", "args": {"pattern": "**/*.py"}}
+           {"tool": "glob", "args": {"pattern": "src/**/*.ts", "root": "/project"}}
+
+grep       Search file contents by regex. Returns file:line:match format. Essential for finding code.
+           {"tool": "grep", "args": {"pattern": "def authenticate"}}
+           {"tool": "grep", "args": {"pattern": "TODO|FIXME", "path": "src/", "file_glob": "*.py", "max_results": 20}}
+
+tree       Show directory structure as a tree. Excludes __pycache__, node_modules, .git.
+           {"tool": "tree", "args": {}}
+           {"tool": "tree", "args": {"path": "src/", "max_depth": 2}}
+
+list_dir   List directory contents with file sizes. Lighter than tree for quick directory checks.
+           {"tool": "list_dir", "args": {"path": "src/"}}
+
+file_info  Get file metadata: size, modified date, permissions, line count, type.
+           {"tool": "file_info", "args": {"path": "package.json"}}
+
+analyze_file  Analyze a source file: shows language, imports, all function/class definitions, and what other files import it.
+           {"tool": "analyze_file", "args": {"path": "src/web.py"}}
+
+project_deps  Show project dependency graph: file counts by language, core modules (most imported files).
+           {"tool": "project_deps", "args": {}}
+
+find_symbol  Find all definitions of a function/class name across the entire project.
+           {"tool": "find_symbol", "args": {"name": "authenticate_user"}}
+
+semantic_search  Semantic codebase search using embeddings. Best for conceptual queries.
+           {"tool": "semantic_search", "args": {"query": "user authentication flow"}}
+
+pdf_read   Extract text from a PDF file. Reads up to max_pages (default 10).
+           {"tool": "pdf_read", "args": {"path": "docs/spec.pdf", "max_pages": 5}}
+
+── FILE WRITING ──────────────────────────────────────────
+write      Create/overwrite a file. Creates parent directories automatically. Returns byte count.
+           {"tool": "write", "args": {"path": "src/utils.py", "content": "def helper():\\n    return True\\n"}}
+
+edit       Surgical text replacement in a file. old_text must match EXACTLY and be UNIQUE in the file.
+           Preferred for small, precise changes. Fails if old_text matches multiple locations.
+           {"tool": "edit", "args": {"path": "src/main.py", "old_text": "def old_name():", "new_text": "def new_name():"}}
+
+batch_edit Apply multiple edits to one or more files in a single call. Each edit is {path, old_text, new_text}.
+           {"tool": "batch_edit", "args": {"edits": [{"path": "a.py", "old_text": "foo", "new_text": "bar"}, {"path": "b.py", "old_text": "baz", "new_text": "qux"}]}}
+
+regex_replace  Find-and-replace using regex in a file. More powerful than edit for pattern-based changes. count=0 means replace all.
+           {"tool": "regex_replace", "args": {"path": "src/config.py", "pattern": "v\\\\d+\\\\.\\\\d+", "replacement": "v2.0", "count": 1}}
+
+diff_preview  Preview what an edit would look like as a unified diff without applying it. Use before complex edits to verify.
+           {"tool": "diff_preview", "args": {"path": "src/main.py", "old_text": "old code", "new_text": "new code"}}
+
+── SHELL & EXECUTION ─────────────────────────────────────
+shell      Run a shell command on the host machine. Returns exit code + stdout + stderr. Default timeout 60s.
+           {"tool": "shell", "args": {"cmd": "pip install requests"}}
+           {"tool": "shell", "args": {"cmd": "pytest tests/ -v", "timeout": 120}}
+
+python_eval  Evaluate a Python expression safely. Good for math, string ops, list comprehensions. No file/network access.
+           {"tool": "python_eval", "args": {"expression": "sum(range(1, 101))"}}
+           {"tool": "python_eval", "args": {"expression": "[x**2 for x in range(10)]"}}
+
+run_tests  Run the project's test suite (auto-detects pytest/unittest/npm test). Returns pass/fail + output.
+           {"tool": "run_tests", "args": {}}
+
+sandbox_run  Run code in a Docker sandbox (no network, 256MB RAM, 30s timeout). Safe for untrusted code.
+           {"tool": "sandbox_run", "args": {"code": "print(2**100)", "language": "python", "timeout": 10}}
+
+spawn_agent  Launch a sub-agent for a parallel sub-task. Agent types: reasoner, coder, researcher, planner, tool_user, security, fast.
+           {"tool": "spawn_agent", "args": {"agent": "researcher", "task": "search for Python best practices for error handling"}}
+
+── WEB & NETWORK ─────────────────────────────────────────
+web        Quick web search via DuckDuckGo. Returns JSON array with title/body/href. Good for simple lookups.
+           {"tool": "web", "args": {"query": "python asyncio tutorial", "max_results": 5}}
+
+deep_research  Multi-step research: searches, reads top results, extracts key facts. BETTER than web for complex questions.
+           {"tool": "deep_research", "args": {"query": "best practices for REST API rate limiting", "max_depth": 2}}
+
+multi_search  Run multiple search queries in parallel and combine unique results. Good for comparing topics.
+           {"tool": "multi_search", "args": {"queries": ["React vs Svelte performance", "React vs Svelte learning curve"]}}
+
+fetch_url  Fetch a URL and extract readable text (strips HTML). Use to read full articles, docs, or pages.
+           {"tool": "fetch_url", "args": {"url": "https://docs.python.org/3/library/asyncio.html", "max_chars": 8000}}
+
+http_request  Make HTTP requests (GET/POST/PUT/DELETE). For calling APIs. Returns status code + response body.
+           {"tool": "http_request", "args": {"url": "https://api.example.com/data", "method": "POST", "body": "{\\"key\\": \\"value\\"}"}}
+
+json_extract  Navigate JSON data with dot-notation paths. Use after http_request or web to extract specific fields.
+           {"tool": "json_extract", "args": {"data": "{\\"users\\": [{\\"name\\": \\"Alice\\"}]}", "path": "users.0.name"}}
+
+weather    Get current weather + forecast for a location. Uses Open-Meteo (no API key needed).
+           {"tool": "weather", "args": {"location": "New York", "forecast_days": 3}}
+
+── GIT ───────────────────────────────────────────────────
+git_status Show git working tree status (short format: M=modified, A=added, ?=untracked).
+           {"tool": "git_status", "args": {}}
+
+git_diff   Show git diff. Default shows unstaged changes. Use staged=true for staged-only.
+           {"tool": "git_diff", "args": {}}
+           {"tool": "git_diff", "args": {"staged": true}}
+
+git_log    Show recent git commits (default 10). Shows hash, author, date, message.
+           {"tool": "git_log", "args": {"n": 5}}
+
+git_commit Stage ALL changes and create a commit with the given message.
+           {"tool": "git_commit", "args": {"message": "fix: resolve auth token expiry bug"}}
+
+git_checkout  Restore a file to its last committed state. DISCARDS all uncommitted changes to that file.
+           {"tool": "git_checkout", "args": {"path": "src/broken.py"}}
+
+git_stash  Save/restore work-in-progress. Actions: push (save), pop (restore), list (show stashes).
+           {"tool": "git_stash", "args": {"action": "push"}}
+           {"tool": "git_stash", "args": {"action": "pop"}}
+
+── MEDIA & AI ────────────────────────────────────────────
+vision     Analyze an image file using a multimodal vision model. Returns text description.
+           {"tool": "vision", "args": {"image_path": "/path/to/image.png", "prompt": "What does this diagram show?"}}
+
+generate_image  Generate an image from a text prompt using Stable Diffusion. Returns URL to the image file.
+           {"tool": "generate_image", "args": {"prompt": "a futuristic city at sunset", "width": 512, "height": 512}}
+
+speak      Convert text to speech (TTS). Returns URL to the generated WAV audio file.
+           {"tool": "speak", "args": {"text": "The deployment was successful."}}
+
+screenshot Capture a screenshot of the desktop. Returns the image path.
+           {"tool": "screenshot", "args": {}}
+
+── SYSTEM & DATA ─────────────────────────────────────────
+database   Execute a read-only SQL query against a SQLite database. Safe: blocks INSERT/UPDATE/DELETE/DROP.
+           {"tool": "database", "args": {"query": "SELECT * FROM users LIMIT 10", "db_path": "omni_data.db"}}
+
+docker     Run read-only Docker commands: ps, images, logs, inspect, stats. No destructive ops.
+           {"tool": "docker", "args": {"cmd": "ps -a"}}
+           {"tool": "docker", "args": {"cmd": "logs my-container --tail 50"}}
+
+archive    Work with zip/tar archives. Actions: list, extract, create.
+           {"tool": "archive", "args": {"action": "list", "path": "backup.tar.gz"}}
+           {"tool": "archive", "args": {"action": "extract", "path": "data.zip", "dest": "./output/"}}
+
+process_list  List running processes sorted by memory usage. Shows PID, name, CPU%, MEM%.
+           {"tool": "process_list", "args": {}}
+
+kill_process  Send a signal to a process. Default SIGTERM (15). Use 9 for SIGKILL.
+           {"tool": "kill_process", "args": {"pid": 12345, "signal": 15}}
+
+network_info  Show network interfaces and IP addresses.
+           {"tool": "network_info", "args": {}}
+
+env_get    Get the value of an environment variable.
+           {"tool": "env_get", "args": {"name": "HOME"}}
+
+env_set    Set an environment variable for the current process.
+           {"tool": "env_set", "args": {"name": "DEBUG", "value": "1"}}
+
+── CONTROL ───────────────────────────────────────────────
+done       Signal task completion. Put your final answer in the result field.
+           {"tool": "done", "args": {}, "result": "I created the file and ran the tests — all 12 passed."}
+"""
+
+
+def build_tool_reference(tool_names: list[str] | None = None) -> str:
+    """Build a tool reference string for a specific set of tools, or all tools if None."""
+    if tool_names is None:
+        return TOOL_DETAILED_REFERENCE
+    lines = []
+    for name in tool_names:
+        entry = TOOL_REGISTRY.get(name)
+        if entry:
+            lines.append(f"- {name}: {entry['description']} (args: {entry['args']})")
+    return "\n".join(lines)
+
 
 def execute_tool(tool_name: str, args: dict) -> str:
-    """Execute a tool by name with keyword arguments."""
+    """Execute a tool by name with keyword arguments.
+    Supports external MCP tools via 'server__tool' naming convention."""
+    # Route to external MCP server if tool name contains '__'
+    if "__" in tool_name:
+        parts = tool_name.split("__", 1)
+        if len(parts) == 2:
+            server_name, remote_tool = parts
+            try:
+                import asyncio
+                from src.mcp import call_mcp_tool
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        result = pool.submit(
+                            lambda: asyncio.run(call_mcp_tool(server_name, remote_tool, args))
+                        ).result(timeout=30)
+                else:
+                    result = loop.run_until_complete(call_mcp_tool(server_name, remote_tool, args))
+                return result
+            except Exception as e:
+                return str(_err(f"MCP call failed ({server_name}/{remote_tool}): {e}", ToolErrorKind.EXECUTION))
+
     if tool_name not in TOOL_REGISTRY:
         return str(_err(f"Unknown tool '{tool_name}'. Available: {', '.join(TOOL_REGISTRY.keys())}",
                        ToolErrorKind.VALIDATION))

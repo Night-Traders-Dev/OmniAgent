@@ -13,6 +13,7 @@ from src.state import state
 from src.tools import (
     parse_json, execute_tool, TOOL_REGISTRY, TOOL_TIMEOUTS,
     compress_tool_result, detect_uncertainty, ToolErrorKind,
+    TOOL_DETAILED_REFERENCE,
 )
 
 
@@ -153,18 +154,14 @@ class BaseAgent:
 
     async def _execute_teach_mode(self, task: str, context: str, conversation: list[dict] | None, loop) -> AgentResult:
         """In teach mode, explain what tools would be used but don't execute them."""
-        tool_descriptions = "\n".join(
-            f"- {name}: {info['description']}"
-            for name, info in TOOL_REGISTRY.items()
-        )
         teach_system = (
             f"{self.system_prompt}\n\n"
             f"{self._build_environment_context()}\n\n"
             "You are in TEACHING mode. The user wants to LEARN.\n"
-            f"Available tools (DO NOT EXECUTE, just explain):\n{tool_descriptions}\n\n"
+            f"Available tools (DO NOT EXECUTE, just explain what you would use and why):\n{TOOL_DETAILED_REFERENCE}\n\n"
             "For each step:\n"
             "1. Explain WHAT you would do and WHY\n"
-            "2. Show the exact command/tool call as a code block\n"
+            "2. Show the exact tool call JSON as a code block\n"
             "3. Explain what the expected output would look like\n"
             "4. Then move to the next step\n"
             "Be educational, thorough, and show your reasoning."
@@ -196,11 +193,6 @@ class BaseAgent:
         """Multi-step agentic loop with self-correction and streaming progress."""
         from datetime import datetime
 
-        tool_descriptions = "\n".join(
-            f"- {name}: {info['description']} (args: {info['args']})"
-            for name, info in TOOL_REGISTRY.items()
-        )
-
         from src.agents.specialists import EXECUTE_MODE_DIRECTIVE
         env_context = self._build_environment_context()
 
@@ -208,13 +200,20 @@ class BaseAgent:
             f"{self.system_prompt}\n\n"
             f"{env_context}\n\n"
             f"{EXECUTE_MODE_DIRECTIVE}\n\n"
-            f"You have access to these tools:\n{tool_descriptions}\n\n"
-            "To use a tool, respond with ONLY a JSON object:\n"
-            '{"tool": "tool_name", "args": {"arg1": "value1"}, "reasoning": "why"}\n\n'
+            f"{TOOL_DETAILED_REFERENCE}\n\n"
+            "HOW TO CALL TOOLS:\n"
+            "Respond with ONLY a JSON object — no text before or after:\n"
+            '{"tool": "tool_name", "args": {"arg1": "value1"}, "reasoning": "why I chose this tool"}\n\n'
             "To finish, respond with:\n"
             '{"tool": "done", "args": {}, "result": "your final answer to the user"}\n\n'
-            "IMPORTANT: Your FIRST response MUST be a tool call JSON, not plain text.\n"
-            "NEVER explain steps. EXECUTE them with tool calls.\n"
+            "RULES:\n"
+            "- Your FIRST response MUST be a tool call JSON, not plain text.\n"
+            "- NEVER explain steps. EXECUTE them with tool calls.\n"
+            "- EVERY response must be exactly ONE JSON tool call.\n"
+            "- Choose the RIGHT tool: use 'edit' for small changes, 'write' for new files, 'batch_edit' for multi-file changes.\n"
+            "- Use 'grep' to find code before editing. Use 'read' to verify file contents. Use 'glob' to discover files.\n"
+            "- After write/edit, use 'run_tests' to verify your changes work.\n"
+            "- Use 'deep_research' instead of 'web' for complex questions.\n"
             "\nSELF-CORRECTION RULES:\n"
             "- After each tool result, check if it contains errors\n"
             "- If a tool returned an error, analyze what went wrong and try a different approach\n"
@@ -441,11 +440,12 @@ class BaseAgent:
             f"- Working directory: {os.getcwd()}\n"
             f"- Python: {platform.python_version()}\n"
             f"- Network: {network_ip}\n"
-            f"\nYou are OmniAgent v7 — a modular autonomous AI agent framework running locally.\n"
+            f"\nYou are OmniAgent v8.5.0 — a modular autonomous AI agent framework running locally with 47 tools and 7 specialist agents.\n"
             f"You have multiple specialist agents: {', '.join(EXPERTS.keys())}.\n"
             f"Models: {', '.join(f'{k}={v}' for k,v in EXPERTS.items())}.\n"
-            f"You have access to the local filesystem, shell, web search, weather API, "
-            f"URL fetching, git, and codebase exploration tools (glob, grep, tree).\n"
+            f"You have 47 tools across 8 categories: file I/O (read/write/edit/glob/grep/tree), "
+            f"shell execution, web search (web/deep_research/fetch_url), git, media (vision/image gen/TTS), "
+            f"system (process/network/docker), data (database/PDF/archive), and sub-agent spawning.\n"
             f"You can read/write/edit files on THIS machine. You run commands on THIS machine.\n"
             f"When asked about 'your system' or 'what OS', answer about THIS host — not in general terms.\n"
             f"When asked about GitHub, Google, etc — check if integrations are connected and use them.\n"
