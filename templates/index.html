@@ -219,6 +219,95 @@
         /* Branch indicator */
         .branch-btn{background:transparent;border:none;color:var(--dim);cursor:pointer;font-size:.75rem;padding:2px 6px}
         .branch-btn:hover{color:var(--accent)}
+
+        /* ═══ Rich Card System ═══ */
+        .omni-card{border-radius:12px;padding:16px;margin:12px 0;font-family:system-ui,sans-serif;position:relative;overflow:hidden}
+        .omni-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px}
+
+        /* Weather Card */
+        .card-weather{background:linear-gradient(135deg,#1a2a4a 0%,#1e3a5f 50%,#1a3050 100%);border:1px solid #2a4a6a}
+        .card-weather::before{background:linear-gradient(90deg,#4a9eff,#6ab4ff,#4a9eff)}
+        .card-weather .cw-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+        .card-weather .cw-location{font-size:.85rem;color:#8ab4e0;font-weight:500;letter-spacing:.5px;text-transform:uppercase}
+        .card-weather .cw-icon{font-size:2.5rem;line-height:1}
+        .card-weather .cw-main{display:flex;align-items:baseline;gap:8px;margin-bottom:4px}
+        .card-weather .cw-temp{font-size:2.8rem;font-weight:200;color:#fff;letter-spacing:-2px}
+        .card-weather .cw-condition{font-size:1rem;color:#a0c8e8}
+        .card-weather .cw-details{display:flex;gap:16px;margin:10px 0;padding:10px 0;border-top:1px solid #2a4a6a;border-bottom:1px solid #2a4a6a}
+        .card-weather .cw-detail{font-size:.8rem;color:#8ab4e0}
+        .card-weather .cw-detail span{display:block;color:#cde;font-size:.9rem;font-weight:500}
+        .card-weather .cw-forecast{display:grid;grid-template-columns:repeat(auto-fit,minmax(90px,1fr));gap:8px;margin-top:8px}
+        .card-weather .cw-day{background:rgba(255,255,255,.06);border-radius:8px;padding:8px;text-align:center}
+        .card-weather .cw-day-name{font-size:.7rem;color:#8ab4e0;text-transform:uppercase;margin-bottom:4px}
+        .card-weather .cw-day-icon{font-size:1.2rem;margin:2px 0}
+        .card-weather .cw-day-temps{font-size:.8rem;color:#cde}
+        .card-weather .cw-day-temps .lo{color:#6a8aaa}
+        .card-weather .cw-precip{font-size:.65rem;color:#6ab4ff;margin-top:2px}
+
+        /* Code Block Enhancement */
+        pre{position:relative}
+        .code-lang-badge{position:absolute;top:6px;right:42px;font-size:.6rem;padding:2px 8px;background:var(--accent);color:#000;border-radius:4px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;z-index:1}
+        .code-copy-btn{position:absolute;top:4px;right:4px;background:rgba(255,255,255,.1);border:none;color:var(--dim);cursor:pointer;padding:4px 8px;border-radius:4px;font-size:.7rem;z-index:1;transition:all .15s}
+        .code-copy-btn:hover{background:var(--accent);color:#000}
+
+        /* Error Card */
+        .card-error{background:linear-gradient(135deg,#3a1a1a,#2a1515);border:1px solid #5a2a2a;display:flex;gap:12px;align-items:flex-start}
+        .card-error::before{background:linear-gradient(90deg,#ff4a4a,#ff6a4a,#ff4a4a)}
+        .card-error .ce-icon{font-size:1.4rem;flex-shrink:0;margin-top:2px}
+        .card-error .ce-body{flex:1;min-width:0}
+        .card-error .ce-title{color:#ff8a8a;font-weight:600;font-size:.85rem;margin-bottom:4px}
+        .card-error .ce-msg{color:#caa;font-size:.85rem;word-break:break-word}
+        .card-error code{background:rgba(255,100,100,.15);padding:1px 4px;border-radius:3px;font-size:.8rem}
+
+        /* File Operation Card */
+        .card-file{display:flex;gap:12px;align-items:center;border:1px solid #2a4a2a}
+        .card-file.created{background:linear-gradient(135deg,#1a2a1a,#152015)}
+        .card-file.created::before{background:#4aff4a}
+        .card-file.edited{background:linear-gradient(135deg,#2a2a1a,#201e15)}
+        .card-file.edited::before{background:#ffcc4a}
+        .card-file.deleted{background:linear-gradient(135deg,#2a1a1a,#201515)}
+        .card-file.deleted::before{background:#ff4a4a}
+        .card-file .cf-icon{font-size:1.6rem;flex-shrink:0}
+        .card-file .cf-path{color:#cde;font-family:monospace;font-size:.85rem;word-break:break-all}
+        .card-file .cf-detail{color:#8ab4e0;font-size:.75rem}
+
+        /* Git Card */
+        .card-git{background:linear-gradient(135deg,#1a1a2a,#151520);border:1px solid #3a3a5a}
+        .card-git::before{background:linear-gradient(90deg,#f05033,#f05033 50%,#3fb950 50%)}
+        .card-git .cg-header{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+        .card-git .cg-icon{font-size:1.2rem}
+        .card-git .cg-title{font-size:.85rem;color:#cde;font-weight:600}
+        .card-git .cg-files{list-style:none;padding:0;margin:0}
+        .card-git .cg-files li{font-family:monospace;font-size:.8rem;padding:3px 8px;border-radius:4px;margin:2px 0;display:flex;gap:8px;align-items:center}
+        .card-git .cg-files .st{width:14px;text-align:center;font-weight:700;font-size:.75rem}
+        .card-git .cg-files .st.M{color:#e8ab4a}
+        .card-git .cg-files .st.A{color:#3fb950}
+        .card-git .cg-files .st.D{color:#ff4a4a}
+        .card-git .cg-files .st.U{color:#8a8a8a}
+
+        /* Search Results Card */
+        .card-search{background:linear-gradient(135deg,#1a1a1a,#151515);border:1px solid #333}
+        .card-search::before{background:linear-gradient(90deg,var(--accent),#8a6aff,var(--accent))}
+        .card-search .cs-result{padding:10px 0;border-bottom:1px solid #2a2a2a}
+        .card-search .cs-result:last-child{border-bottom:none}
+        .card-search .cs-title{color:var(--accent);font-size:.9rem;font-weight:500}
+        .card-search .cs-title a{color:var(--accent);text-decoration:none}
+        .card-search .cs-title a:hover{text-decoration:underline}
+        .card-search .cs-snippet{color:#aaa;font-size:.8rem;margin-top:4px;line-height:1.4}
+        .card-search .cs-url{color:#6a8a6a;font-size:.7rem;margin-top:2px;word-break:break-all}
+
+        /* Light theme adjustments */
+        [data-theme="light"] .card-weather{background:linear-gradient(135deg,#e8f0ff,#d0e4ff);border-color:#b0c8e8}
+        [data-theme="light"] .card-weather .cw-temp{color:#1a3050}
+        [data-theme="light"] .card-weather .cw-location,[data-theme="light"] .card-weather .cw-detail{color:#4a6a8a}
+        [data-theme="light"] .card-weather .cw-condition{color:#3a5a7a}
+        [data-theme="light"] .card-weather .cw-detail span{color:#1a3050}
+        [data-theme="light"] .card-weather .cw-day{background:rgba(0,0,0,.04)}
+        [data-theme="light"] .card-error{background:linear-gradient(135deg,#fff0f0,#ffe8e8);border-color:#e0a0a0}
+        [data-theme="light"] .card-error .ce-title{color:#c03030}
+        [data-theme="light"] .card-error .ce-msg{color:#6a3030}
+        [data-theme="light"] .card-git{background:linear-gradient(135deg,#f0f0ff,#e8e8f8);border-color:#c0c0d8}
+        [data-theme="light"] .card-search{background:linear-gradient(135deg,#fafafa,#f5f5f5);border-color:#ddd}
     </style>
 </head>
 <body>
@@ -936,6 +1025,168 @@
             }
             // Render inline media (images, audio, video, files)
             renderMediaInline(container);
+            // Render rich UI cards (weather, git, errors, files, search results)
+            renderCards(container);
+            // Enhance code blocks (language badge + copy button)
+            enhanceCodeBlocks(container);
+        }
+
+        // ═══ Rich Card System ═══
+
+        const _conditionIcons = {
+            'clear':'☀️','sunny':'☀️','fair':'☀️',
+            'partly':'⛅','partly cloudy':'⛅','mostly cloudy':'🌥️',
+            'cloudy':'☁️','overcast':'☁️',
+            'rain':'🌧️','light rain':'🌦️','drizzle':'🌦️','showers':'🌧️','heavy rain':'🌧️',
+            'thunderstorm':'⛈️','thunder':'⛈️','storm':'⛈️',
+            'snow':'❄️','light snow':'🌨️','heavy snow':'❄️','blizzard':'🌨️','flurries':'🌨️',
+            'fog':'🌫️','mist':'🌫️','haze':'🌫️',
+            'wind':'💨','windy':'💨',
+            'sleet':'🌨️','freezing':'🥶','ice':'🧊',
+        };
+        function weatherIcon(condition) {
+            const c = (condition||'').toLowerCase();
+            for (const [k,v] of Object.entries(_conditionIcons)) { if (c.includes(k)) return v; }
+            return '🌡️';
+        }
+        function dayName(dateStr) {
+            try { const d = new Date(dateStr + 'T12:00:00'); return d.toLocaleDateString('en-US',{weekday:'short'}); }
+            catch(_) { return dateStr; }
+        }
+
+        function renderCards(container) {
+            // Walk text nodes looking for card-worthy patterns
+            const html = container.innerHTML;
+
+            // 1. Weather card — detect RAW_JSON block from weather tool
+            const wMatch = html.match(/WEATHER FOR ([^\n]+)\n([\s\S]*?)RAW_JSON:\s*\n(\{[\s\S]*?\n\})/);
+            if (wMatch) {
+                try {
+                    const rawJson = JSON.parse(wMatch[3]);
+                    const cur = rawJson.current || {};
+                    const forecast = rawJson.forecast || [];
+                    let forecastHtml = forecast.map(d => `
+                        <div class="cw-day">
+                            <div class="cw-day-name">${dayName(d.date)}</div>
+                            <div class="cw-day-icon">${weatherIcon(d.condition)}</div>
+                            <div class="cw-day-temps">${d.high_f} <span class="lo">${d.low_f}</span></div>
+                            <div class="cw-precip">💧${d.precip_chance}</div>
+                        </div>
+                    `).join('');
+                    const card = `<div class="omni-card card-weather">
+                        <div class="cw-header">
+                            <div class="cw-location">📍 ${cur.location || wMatch[1]}</div>
+                            <div class="cw-icon">${weatherIcon(cur.condition)}</div>
+                        </div>
+                        <div class="cw-main">
+                            <div class="cw-temp">${cur.temperature_f || ''}</div>
+                            <div class="cw-condition">${cur.condition || ''}</div>
+                        </div>
+                        <div class="cw-details">
+                            <div class="cw-detail">Feels Like<span>${cur.feels_like_f || '—'}</span></div>
+                            <div class="cw-detail">Humidity<span>${cur.humidity || '—'}</span></div>
+                            <div class="cw-detail">Wind<span>${cur.wind || '—'}</span></div>
+                        </div>
+                        <div class="cw-forecast">${forecastHtml}</div>
+                    </div>`;
+                    // Replace the entire weather block (text + JSON) with the card
+                    const fullBlock = wMatch[0];
+                    const escapedBlock = fullBlock.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    // Find the pre/code or <p> containing the weather text and replace
+                    container.innerHTML = container.innerHTML.replace(
+                        new RegExp(escapeHtmlForRegex('WEATHER FOR ' + wMatch[1]) + '[\\s\\S]*?RAW_JSON:[\\s\\S]*?\\}\\s*(<\\/code><\\/pre>|<\\/p>)?'),
+                        card
+                    );
+                } catch(e) { console.warn('Weather card parse error:', e); }
+            }
+
+            // 2. Git status card — detect git short-format output
+            const gitBlock = container.innerHTML.match(/<code[^>]*>((?:\s*[MADURC?! ]{1,2}\s+\S+\n?){2,})<\/code>/);
+            if (gitBlock) {
+                const lines = gitBlock[1].trim().split('\n').filter(l => l.trim());
+                const items = lines.map(l => {
+                    const m = l.trim().match(/^([MADURC?!]{1,2})\s+(.+)/);
+                    if (!m) return null;
+                    return {status: m[1].trim(), file: m[2].trim()};
+                }).filter(Boolean);
+                if (items.length > 0) {
+                    const filesHtml = items.map(i =>
+                        `<li><span class="st ${i.status[0]}">${i.status}</span><span>${i.file}</span></li>`
+                    ).join('');
+                    const card = `<div class="omni-card card-git">
+                        <div class="cg-header"><span class="cg-icon">🔀</span><span class="cg-title">Git Status — ${items.length} file${items.length>1?'s':''}</span></div>
+                        <ul class="cg-files">${filesHtml}</ul>
+                    </div>`;
+                    container.innerHTML = container.innerHTML.replace(gitBlock[0], card);
+                }
+            }
+
+            // 3. Error cards — detect ERROR[type] patterns
+            container.querySelectorAll('p, li').forEach(el => {
+                const m = el.textContent.match(/ERROR\[(\w+)\](?:\s*\(retryable\))?:\s*(.*)/);
+                if (m) {
+                    const card = document.createElement('div');
+                    card.className = 'omni-card card-error';
+                    card.innerHTML = `<span class="ce-icon">⚠️</span><div class="ce-body"><div class="ce-title">${m[1]}</div><div class="ce-msg">${m[2]}</div></div>`;
+                    el.replaceWith(card);
+                }
+            });
+
+            // 4. File operation cards — detect "Wrote X bytes" or "Created" or "Edited" patterns
+            container.querySelectorAll('p').forEach(el => {
+                const t = el.textContent;
+                let m = t.match(/(?:Wrote|Written)\s+(\d+)\s+bytes?\s+to\s+(\S+)/i);
+                if (m) {
+                    const card = document.createElement('div');
+                    card.className = 'omni-card card-file created';
+                    card.innerHTML = `<span class="cf-icon">📄</span><div><div class="cf-path">${m[2]}</div><div class="cf-detail">✅ ${m[1]} bytes written</div></div>`;
+                    el.replaceWith(card);
+                    return;
+                }
+                m = t.match(/Edited\s+(\S+).*?replaced/i);
+                if (m) {
+                    const card = document.createElement('div');
+                    card.className = 'omni-card card-file edited';
+                    card.innerHTML = `<span class="cf-icon">✏️</span><div><div class="cf-path">${m[1]}</div><div class="cf-detail">📝 Text replaced</div></div>`;
+                    el.replaceWith(card);
+                }
+            });
+        }
+
+        function escapeHtmlForRegex(s) {
+            return s.replace(/[.*+?^${}()|[\]\\<>&]/g, c => {
+                const map = {'<':'(?:<|&lt;)','>':'(?:>|&gt;)','&':'(?:&|&amp;)'};
+                return map[c] || ('\\' + c);
+            });
+        }
+
+        function enhanceCodeBlocks(container) {
+            container.querySelectorAll('pre > code').forEach(code => {
+                const pre = code.parentElement;
+                if (pre.querySelector('.code-copy-btn')) return; // Already enhanced
+                // Language badge
+                const cls = [...code.classList].find(c => c.startsWith('language-'));
+                if (cls) {
+                    const lang = cls.replace('language-','');
+                    if (lang && lang !== 'undefined') {
+                        const badge = document.createElement('span');
+                        badge.className = 'code-lang-badge';
+                        badge.textContent = lang;
+                        pre.appendChild(badge);
+                    }
+                }
+                // Copy button
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.textContent = 'Copy';
+                btn.onclick = () => {
+                    navigator.clipboard.writeText(code.textContent).then(() => {
+                        btn.textContent = '✓';
+                        setTimeout(() => btn.textContent = 'Copy', 1500);
+                    });
+                };
+                pre.appendChild(btn);
+            });
         }
 
         // --- Inline Media Rendering ---

@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get version
+        id: version
+        run: echo "version=$(cat VERSION)" >> $GITHUB_OUTPUT
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: OmniAgent v${{ steps.version.outputs.version }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  build-android:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build APK
+        working-directory: android
+        run: ./gradlew assembleDebug
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk OmniAgent-v${{ needs.create-release.outputs.version }}-android.apk
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: OmniAgent-v${{ needs.create-release.outputs.version }}-android.apk
+
+  build-linux:
+    needs: create-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libjavascriptcoregtk-4.1-dev
+      - name: Sync version from VERSION file
+        run: |
+          VERSION=$(cat VERSION)
+          cd desktop/src-tauri
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" tauri.conf.json
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli
+      - name: Build
+        working-directory: desktop
+        run: cargo tauri build --bundles deb,rpm
+      - name: Rename artifacts
+        run: |
+          cp desktop/src-tauri/target/release/bundle/deb/*.deb OmniAgent-v${{ needs.create-release.outputs.version }}-linux-amd64.deb
+          cp desktop/src-tauri/target/release/bundle/rpm/*.rpm OmniAgent-v${{ needs.create-release.outputs.version }}-linux-x86_64.rpm
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            OmniAgent-v${{ needs.create-release.outputs.version }}-linux-amd64.deb
+            OmniAgent-v${{ needs.create-release.outputs.version }}-linux-x86_64.rpm
+
+  build-windows:
+    needs: create-release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Sync version from VERSION file
+        shell: bash
+        run: |
+          VERSION=$(cat VERSION)
+          cd desktop/src-tauri
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" tauri.conf.json
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli
+      - name: Build
+        working-directory: desktop
+        run: cargo tauri build --bundles msi,nsis
+      - name: Rename artifacts
+        shell: bash
+        run: |
+          cp desktop/src-tauri/target/release/bundle/msi/*.msi OmniAgent-v${{ needs.create-release.outputs.version }}-windows-x64.msi
+          cp desktop/src-tauri/target/release/bundle/nsis/*.exe OmniAgent-v${{ needs.create-release.outputs.version }}-windows-x64-setup.exe
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            OmniAgent-v${{ needs.create-release.outputs.version }}-windows-x64.msi
+            OmniAgent-v${{ needs.create-release.outputs.version }}-windows-x64-setup.exe

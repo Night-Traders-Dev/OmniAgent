@@ -1,5 +1,5 @@
 # ============================================================
-# OmniAgent v8.3 — .gitignore
+# OmniAgent v8.5 — .gitignore
 # ============================================================
 
 # ── Python ───────────────────────────────────────────────────
@@ -9,8 +9,6 @@ __pycache__/
 *.so
 *.egg-info/
 *.egg
-dist/
-build/
 *.whl
 .venv/
 venv/
@@ -24,6 +22,7 @@ pip-delete-this-directory.txt
 omni_data.db
 omni_data.db-wal
 omni_data.db-shm
+omni_data.db-journal
 
 # Session state
 omni_session.json
@@ -51,8 +50,10 @@ logs/
 .env.local
 .env.production
 .env.*.local
+credentials.json
+client_secret*.json
 
-# ── BitNet (1.2GB model + compiled binary) ──────────────────
+# ── BitNet (1.2GB model + compiled binaries) ────────────────
 bitnet/model/
 bitnet/llama-server
 bitnet/llama-cli
@@ -77,11 +78,50 @@ android/.cxx/
 *.keystore
 android/app/*.apk
 
+# Standalone APK builds at repo root
+*.apk
+
 # ── Gradle ──────────────────────────────────────────────────
 .gradle/
 gradle-app.setting
 !gradle-wrapper.jar
 !gradle-wrapper.properties
+
+# ── Tauri / Desktop ─────────────────────────────────────────
+desktop/src-tauri/target/
+desktop/node_modules/
+desktop/package-lock.json
+
+# ── VS Code Extension ──────────────────────────────────────
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# ── Node (frontend tooling) ────────────────────────────────
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# ── Fine-tuning data ────────────────────────────────────────
+finetune_data/
+
+# ── ML Models (too large for git) ───────────────────────────
+*.gguf
+*.bin
+*.safetensors
+*.pt
+*.pth
+*.h5
+*.tflite
+# Exception: keep Android assets if bundled
+!android/app/src/main/assets/**
+
+# ── RAG / Vector index ─────────────────────────────────────
+chromadb/
+faiss_index/
+*.faiss
+*.index
 
 # ── IDE / Editor ─────────────────────────────────────────────
 .idea/
@@ -106,33 +146,28 @@ $RECYCLE.BIN/
 # ── Docker ───────────────────────────────────────────────────
 docker/data/
 
-# ── Node (if any frontend tooling added later) ──────────────
-node_modules/
-package-lock.json
-yarn.lock
+# ── Testing / Coverage ─────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+.tox/
+.nox/
 
-# ── ML Models (too large for git) ───────────────────────────
-*.gguf
-*.bin
-*.safetensors
-*.pt
-*.pth
-*.h5
-*.tflite
-# Exception: keep Android assets if bundled
-!android/app/src/main/assets/**
-
-# ── Tauri / Desktop ─────────────────────────────────────────
-desktop/src-tauri/target/
-desktop/node_modules/
-desktop/package-lock.json
-
-# ── Fine-tuning data ────────────────────────────────────────
-finetune_data/
-
-# ── VS Code Extension ──────────────────────────────────────
-vscode-extension/node_modules/
-vscode-extension/*.vsix
+# ── Build artifacts ─────────────────────────────────────────
+dist/
+build/
+*.deb
+*.rpm
+*.msi
+*.exe
+*.AppImage
+!mcp_server.py
+!omni_agent.py
+!gpu_worker.py
+!setup-gpu-worker-wsl.ps1
 
 # ── Misc ─────────────────────────────────────────────────────
 *.bak
@@ -141,9 +176,3 @@ vscode-extension/*.vsix
 *.orig
 *.rej
 .cache/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-coverage.xml

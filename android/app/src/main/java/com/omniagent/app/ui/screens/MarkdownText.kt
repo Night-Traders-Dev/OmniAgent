@@ -48,6 +48,10 @@ fun MarkdownText(text: String, context: Context = LocalContext.current) {
                 is MdBlock.Blockquote -> BlockquoteView(block.text, context)
                 is MdBlock.ListItem -> ListItemView(block.text, block.ordered, block.index, context)
                 is MdBlock.MediaBlock -> MediaCardView(block.url, block.name, block.type, context)
+                is MdBlock.WeatherCard -> WeatherCardView(block)
+                is MdBlock.ErrorCard -> ErrorCardView(block)
+                is MdBlock.FileCard -> FileCardView(block)
+                is MdBlock.GitCard -> GitCardView(block)
                 is MdBlock.Paragraph -> InlineMarkdownText(block.text, context)
             }
         }
@@ -62,8 +66,17 @@ sealed class MdBlock {
     data class Blockquote(val text: String) : MdBlock()
     data class ListItem(val text: String, val ordered: Boolean, val index: Int) : MdBlock()
     data class Paragraph(val text: String) : MdBlock()
-    data class MediaBlock(val url: String, val name: String, val type: String) : MdBlock() // image, audio, video, file
+    data class MediaBlock(val url: String, val name: String, val type: String) : MdBlock()
+    data class WeatherCard(val location: String, val temp: String, val feelsLike: String,
+        val condition: String, val humidity: String, val wind: String,
+        val forecast: List<ForecastDay>) : MdBlock()
+    data class ErrorCard(val kind: String, val message: String) : MdBlock()
+    data class FileCard(val path: String, val detail: String, val action: String) : MdBlock()
+    data class GitCard(val files: List<GitFile>) : MdBlock()
 }
+
+data class ForecastDay(val date: String, val high: String, val low: String, val condition: String, val precip: String)
+data class GitFile(val status: String, val path: String)
 
 fun parseMarkdownBlocks(text: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
@@ -73,6 +86,84 @@ fun parseMarkdownBlocks(text: String): List<MdBlock> {
 
     while (i < lines.size) {
         val line = lines[i]
+
+        // Weather block — detect "WEATHER FOR ... RAW_JSON:{...}"
+        if (line.startsWith("WEATHER FOR ")) {
+            val weatherLines = mutableListOf(line)
+            i++
+            while (i < lines.size) {
+                weatherLines.add(lines[i])
+                if (lines[i].trim() == "}") break
+                i++
+            }
+            i++
+            val full = weatherLines.joinToString("\n")
+            val jsonIdx = full.indexOf("RAW_JSON:")
+            if (jsonIdx >= 0) {
+                try {
+                    val jsonStr = full.substring(jsonIdx + 9).trim()
+                    val json = com.google.gson.JsonParser.parseString(jsonStr).asJsonObject
+                    val cur = json.getAsJsonObject("current")
+                    val fc = json.getAsJsonArray("forecast")?.map { it.asJsonObject }
+                    blocks.add(MdBlock.WeatherCard(
+                        location = cur?.get("location")?.asString ?: "",
+                        temp = cur?.get("temperature_f")?.asString ?: "",
+                        feelsLike = cur?.get("feels_like_f")?.asString ?: "",
+                        condition = cur?.get("condition")?.asString ?: "",
+                        humidity = cur?.get("humidity")?.asString ?: "",
+                        wind = cur?.get("wind")?.asString ?: "",
+                        forecast = fc?.map { d -> ForecastDay(
+                            date = d.get("date")?.asString ?: "",
+                            high = d.get("high_f")?.asString ?: "",
+                            low = d.get("low_f")?.asString ?: "",
+                            condition = d.get("condition")?.asString ?: "",
+                            precip = d.get("precip_chance")?.asString ?: "",
+                        )} ?: emptyList(),
+                    ))
+                    continue
+                } catch (_: Throwable) {}
+            }
+            // Fallback: emit as paragraph
+            blocks.add(MdBlock.Paragraph(full.substringBefore("RAW_JSON:").trim()))
+            continue
+        }
+
+        // Error card — detect ERROR[kind]: message
+        val errMatch = Regex("^ERROR\\[(\\w+)](?:\\s*\\(retryable\\))?:\\s*(.+)").find(line)
+        if (errMatch != null) {
+            blocks.add(MdBlock.ErrorCard(errMatch.groupValues[1], errMatch.groupValues[2]))
+            i++; continue
+        }
+
+        // File operation card — detect "Wrote X bytes to path" or "Edited path"
+        val writeMatch = Regex("^(?:Wrote|Written)\\s+(\\d+)\\s+bytes?\\s+to\\s+(\\S+)", RegexOption.IGNORE_CASE).find(line)
+        if (writeMatch != null) {
+            blocks.add(MdBlock.FileCard(writeMatch.groupValues[2], "${writeMatch.groupValues[1]} bytes written", "created"))
+            i++; continue
+        }
+        val editMatch = Regex("^Edited\\s+(\\S+).*replaced", RegexOption.IGNORE_CASE).find(line)
+        if (editMatch != null) {
+            blocks.add(MdBlock.FileCard(editMatch.groupValues[1], "Text replaced", "edited"))
+            i++; continue
+        }
+
+        // Git status card — detect consecutive lines like "M  src/file.py"
+        val gitLineRe = Regex("^\\s*[MADURC?!]{1,2}\\s+\\S+")
+        if (gitLineRe.matches(line.trim())) {
+            val gitLines = mutableListOf(line)
+            i++
+            while (i < lines.size && gitLineRe.matches(lines[i].trim())) {
+                gitLines.add(lines[i]); i++
+            }
+            val files = gitLines.mapNotNull { l ->
+                val gm = Regex("^\\s*([MADURC?!]{1,2})\\s+(.+)").find(l.trim())
+                gm?.let { GitFile(it.groupValues[1].trim(), it.groupValues[2].trim()) }
+            }
+            if (files.isNotEmpty()) { blocks.add(MdBlock.GitCard(files)); continue }
+            // Fallback
+            blocks.add(MdBlock.Paragraph(gitLines.joinToString("\n")))
+            continue
+        }
 
         // Code block (fenced)
         if (line.trimStart().startsWith("```")) {
@@ -484,6 +575,170 @@ fun MediaCardView(url: String, name: String, mediaType: String, context: Context
                 },
                 leadingIcon = { Icon(Icons.Filled.Delete, null, tint = RedDark, modifier = Modifier.size(18.dp)) },
             )
+        }
+    }
+}
+
+// ═══ Rich Card Composables ═══
+
+private val WeatherBgTop = Color(0xFF1A2A4A)
+private val WeatherBgBot = Color(0xFF1E3A5F)
+private val WeatherAccent = Color(0xFF4A9EFF)
+private val WeatherDim = Color(0xFF8AB4E0)
+private val WeatherText = Color(0xFFCCDDEE)
+
+private fun weatherIcon(condition: String): String {
+    val c = condition.lowercase()
+    return when {
+        "clear" in c || "sunny" in c || "fair" in c -> "\u2600\uFE0F"
+        "partly" in c -> "\u26C5"
+        "overcast" in c || "cloudy" in c -> "\u2601\uFE0F"
+        "thunder" in c || "storm" in c -> "\u26C8\uFE0F"
+        "rain" in c || "drizzle" in c || "shower" in c -> "\uD83C\uDF27\uFE0F"
+        "snow" in c || "blizzard" in c || "flurr" in c -> "\u2744\uFE0F"
+        "fog" in c || "mist" in c || "haze" in c -> "\uD83C\uDF2B\uFE0F"
+        "wind" in c -> "\uD83D\uDCA8"
+        "sleet" in c || "ice" in c || "freez" in c -> "\uD83E\uDDCA"
+        else -> "\uD83C\uDF21\uFE0F"
+    }
+}
+
+private fun dayName(dateStr: String): String = try {
+    val parts = dateStr.split("-")
+    val cal = java.util.GregorianCalendar(parts[0].toInt(), parts[1].toInt() - 1, parts[2].toInt())
+    java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(cal.time)
+} catch (_: Throwable) { dateStr }
+
+@Composable
+fun WeatherCardView(card: MdBlock.WeatherCard) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = WeatherBgTop,
+        border = BorderStroke(1.dp, Color(0xFF2A4A6A)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            // Header: location + icon
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("\uD83D\uDCCD ${card.location}", fontSize = 12.sp, color = WeatherDim,
+                    fontWeight = FontWeight.Medium, letterSpacing = 0.5.sp)
+                Text(weatherIcon(card.condition), fontSize = 28.sp)
+            }
+            // Big temperature
+            Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.padding(vertical = 4.dp)) {
+                Text(card.temp, fontSize = 36.sp, fontWeight = FontWeight.Thin, color = Color.White,
+                    letterSpacing = (-2).sp)
+                Spacer(Modifier.width(8.dp))
+                Text(card.condition, fontSize = 14.sp, color = WeatherText,
+                    modifier = Modifier.padding(bottom = 6.dp))
+            }
+            // Details row
+            HorizontalDivider(color = Color(0xFF2A4A6A), modifier = Modifier.padding(vertical = 8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                WeatherDetail("Feels Like", card.feelsLike)
+                WeatherDetail("Humidity", card.humidity)
+                WeatherDetail("Wind", card.wind)
+            }
+            HorizontalDivider(color = Color(0xFF2A4A6A), modifier = Modifier.padding(vertical = 8.dp))
+            // Forecast
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                card.forecast.take(5).forEach { day ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .background(Color(0x10FFFFFF), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)) {
+                        Text(dayName(day.date), fontSize = 10.sp, color = WeatherDim)
+                        Text(weatherIcon(day.condition), fontSize = 16.sp)
+                        Text(day.high, fontSize = 12.sp, color = WeatherText)
+                        Text(day.low, fontSize = 11.sp, color = Color(0xFF6A8AAA))
+                        Text("\uD83D\uDCA7${day.precip}", fontSize = 9.sp, color = WeatherAccent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun WeatherDetail(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, fontSize = 10.sp, color = WeatherDim)
+        Text(value, fontSize = 13.sp, color = WeatherText, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+fun ErrorCardView(card: MdBlock.ErrorCard) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF3A1A1A),
+        border = BorderStroke(1.dp, Color(0xFF5A2A2A)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
+            Text("\u26A0\uFE0F", fontSize = 18.sp, modifier = Modifier.padding(end = 10.dp))
+            Column {
+                Text(card.kind, fontSize = 13.sp, color = Color(0xFFFF8A8A), fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(2.dp))
+                Text(card.message, fontSize = 13.sp, color = Color(0xFFCCAAAA), lineHeight = 18.sp)
+            }
+        }
+    }
+}
+
+@Composable
+fun FileCardView(card: MdBlock.FileCard) {
+    val (bg, borderColor, icon) = when (card.action) {
+        "created" -> Triple(Color(0xFF1A2A1A), Color(0xFF2A4A2A), "\uD83D\uDCC4")
+        "edited" -> Triple(Color(0xFF2A2A1A), Color(0xFF4A4A2A), "\u270F\uFE0F")
+        "deleted" -> Triple(Color(0xFF2A1A1A), Color(0xFF4A2A2A), "\uD83D\uDDD1\uFE0F")
+        else -> Triple(CardDark, BorderDark, "\uD83D\uDCC4")
+    }
+    Surface(
+        shape = RoundedCornerShape(12.dp), color = bg,
+        border = BorderStroke(1.dp, borderColor),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(icon, fontSize = 22.sp, modifier = Modifier.padding(end = 10.dp))
+            Column {
+                Text(card.path, fontSize = 13.sp, color = WeatherText, fontFamily = FontFamily.Monospace,
+                    maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(card.detail, fontSize = 11.sp, color = WeatherDim)
+            }
+        }
+    }
+}
+
+@Composable
+fun GitCardView(card: MdBlock.GitCard) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF1A1A2A),
+        border = BorderStroke(1.dp, Color(0xFF3A3A5A)),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                Text("\uD83D\uDD00", fontSize = 16.sp, modifier = Modifier.padding(end = 8.dp))
+                Text("Git Status \u2014 ${card.files.size} file${if (card.files.size != 1) "s" else ""}",
+                    fontSize = 13.sp, color = WeatherText, fontWeight = FontWeight.SemiBold)
+            }
+            card.files.forEach { f ->
+                val statusColor = when (f.status.firstOrNull()) {
+                    'M' -> Color(0xFFE8AB4A)
+                    'A' -> Color(0xFF3FB950)
+                    'D' -> Color(0xFFFF4A4A)
+                    '?' -> Color(0xFF8A8A8A)
+                    else -> TextDim
+                }
+                Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                    Text(f.status, fontSize = 12.sp, color = statusColor, fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace, modifier = Modifier.width(24.dp))
+                    Text(f.path, fontSize = 12.sp, color = TextPrimary, fontFamily = FontFamily.Monospace,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }
