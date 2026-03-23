@@ -109,6 +109,9 @@ static Uint32 last_poll_time = 0;
 static Uint32 last_weather_time = 0;
 static bool running = true;
 
+/* Forward declarations */
+static void save_server_url(void);
+
 /* ═══ Curl helper ═══ */
 typedef struct {
     char *data;
@@ -673,6 +676,7 @@ static void handle_touch(int x, int y) {
                 fetch_metrics();
                 if (metrics.connected) {
                     show_connect_dialog = false;
+                    save_server_url();
                     fetch_weather();
                 }
             }
@@ -716,15 +720,105 @@ static void handle_touch(int x, int y) {
     }
 }
 
+/* ═══ Auto-Discovery ═══ */
+
+static bool try_server(const char *host) {
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "http://%s/api/identify", host);
+    char *resp = http_get(url);
+    if (resp) {
+        bool found = strstr(resp, "OmniAgent") != NULL;
+        free(resp);
+        return found;
+    }
+    return false;
+}
+
+static bool auto_discover(void) {
+    printf("[Hub] Auto-discovering OmniAgent server...\n");
+
+    /* 1. Try saved URL from config file */
+    const char *home = getenv("HOME");
+    if (home) {
+        char cfg_path[512];
+        snprintf(cfg_path, sizeof(cfg_path), "%s/.omniagent-hub-url", home);
+        FILE *f = fopen(cfg_path, "r");
+        if (f) {
+            char saved[256] = {0};
+            if (fgets(saved, sizeof(saved), f)) {
+                /* Strip newline */
+                char *nl = strchr(saved, '\n');
+                if (nl) *nl = '\0';
+                if (saved[0] && try_server(saved)) {
+                    snprintf(server_url, sizeof(server_url), "http://%s", saved);
+                    printf("[Hub] Connected to saved server: %s\n", saved);
+                    fclose(f);
+                    return true;
+                }
+            }
+            fclose(f);
+        }
+    }
+
+    /* 2. Try default: 192.168.254.2:8000 */
+    if (try_server("192.168.254.2:8000")) {
+        snprintf(server_url, sizeof(server_url), "http://192.168.254.2:8000");
+        printf("[Hub] Found server at default: 192.168.254.2:8000\n");
+        return true;
+    }
+
+    /* 3. Try common LAN addresses */
+    const char *common[] = {
+        "192.168.1.1:8000", "192.168.1.2:8000", "192.168.1.100:8000",
+        "192.168.0.1:8000", "192.168.0.2:8000", "192.168.0.100:8000",
+        "10.0.0.1:8000",   "10.0.0.2:8000",
+        NULL
+    };
+    for (int i = 0; common[i]; i++) {
+        if (try_server(common[i])) {
+            snprintf(server_url, sizeof(server_url), "http://%s", common[i]);
+            printf("[Hub] Found server at: %s\n", common[i]);
+            return true;
+        }
+    }
+
+    printf("[Hub] No server found — showing connect dialog\n");
+    return false;
+}
+
+static void save_server_url(void) {
+    /* Save the working URL for next boot */
+    const char *home = getenv("HOME");
+    if (!home || !server_url[0]) return;
+    char cfg_path[512];
+    snprintf(cfg_path, sizeof(cfg_path), "%s/.omniagent-hub-url", home);
+    FILE *f = fopen(cfg_path, "w");
+    if (f) {
+        /* Strip http:// prefix for storage */
+        const char *host = server_url;
+        if (strncmp(host, "http://", 7) == 0) host += 7;
+        fprintf(f, "%s\n", host);
+        fclose(f);
+    }
+}
+
 /* ═══ Main ═══ */
 int main(int argc, char *argv[]) {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+
     /* Optional: server URL from command line */
     if (argc > 1) {
         if (strncmp(argv[1], "http", 4) != 0)
             snprintf(server_url, sizeof(server_url), "http://%s", argv[1]);
         else
-            strncpy(server_url, argv[1], sizeof(server_url) - 1);
+            snprintf(server_url, sizeof(server_url), "%s", argv[1]);
         show_connect_dialog = false;
+    } else {
+        /* Auto-discover server on LAN */
+        if (auto_discover()) {
+            show_connect_dialog = false;
+            save_server_url();
+        }
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
@@ -735,7 +829,6 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
         return 1;
     }
-    curl_global_init(CURL_GLOBAL_DEFAULT);
 
     window = SDL_CreateWindow("OmniAgent Hub",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
