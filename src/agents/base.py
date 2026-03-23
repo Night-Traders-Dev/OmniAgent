@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncGenerator
-from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED, OLLAMA_NUM_CTX
+from src.config import CLIENT, EXPERTS, BITNET_CLIENT, BITNET_MODEL, BITNET_ENABLED, OLLAMA_NUM_CTX, VERSION
 from src.state import state
 from src.tools import (
     parse_json, execute_tool, TOOL_REGISTRY, TOOL_TIMEOUTS,
@@ -440,7 +440,7 @@ class BaseAgent:
             f"- Working directory: {os.getcwd()}\n"
             f"- Python: {platform.python_version()}\n"
             f"- Network: {network_ip}\n"
-            f"\nYou are OmniAgent v8.5.0 — a modular autonomous AI agent framework running locally with 47 tools and 7 specialist agents.\n"
+            f"\nYou are OmniAgent v{VERSION} — a modular autonomous AI agent framework running locally with 47 tools and 7 specialist agents.\n"
             f"You have multiple specialist agents: {', '.join(EXPERTS.keys())}.\n"
             f"Models: {', '.join(f'{k}={v}' for k,v in EXPERTS.items())}.\n"
             f"You have 47 tools across 8 categories: file I/O (read/write/edit/glob/grep/tree), "

@@ -235,8 +235,11 @@ def notify_task_complete(session_id: str, task_summary: str):
 class MCPServer:
     """Basic MCP server implementation for tool exposure."""
 
-    def __init__(self, name: str = "omniagent", version: str = "8.1"):
+    def __init__(self, name: str = "omniagent", version: str = None):
         self.name = name
+        if version is None:
+            from src.config import VERSION
+            version = VERSION
         self.version = version
 
     def get_manifest(self) -> dict:

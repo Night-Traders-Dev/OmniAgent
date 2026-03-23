@@ -238,6 +238,12 @@ class OmniAgentApi(var baseUrl: String = "") {
 
     // --- Settings ---
 
+    suspend fun getVersion(): String = withContext(Dispatchers.IO) {
+        val request = Request.Builder().url("$baseUrl/api/version").build()
+        val response = client.newCall(request).execute()
+        response.body?.string()?.trim() ?: ""
+    }
+
     suspend fun getSettings(): ServerSettings = withContext(Dispatchers.IO) {
         val request = Request.Builder().url("$baseUrl/api/settings").build()
         val response = client.newCall(request).execute()

@@ -394,7 +394,7 @@ fun SettingsSheet(state: ChatUiState, vm: ChatViewModel) {
 
             // About
             SettingsSection("About") {
-                MetricRow("Version", "8.0")
+                MetricRow("Version", state.serverVersion)
                 SettingsButton("View Changelog", Accent) { vm.loadChangelog() }
             }
 

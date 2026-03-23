@@ -317,8 +317,9 @@ class TestEnvironmentContext:
     """Verify the environment context injected into all agents is correct."""
 
     def test_version_string(self):
+        from src.config import VERSION
         env = BaseAgent._build_environment_context()
-        assert "v8.5.0" in env
+        assert f"v{VERSION}" in env
 
     def test_tool_count(self):
         env = BaseAgent._build_environment_context()

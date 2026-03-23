@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from src.config import EXPERTS, BITNET_ENABLED
+from src.config import EXPERTS, BITNET_ENABLED, VERSION
 import src.config as config
 from src.state import ChatReq, state
 from src.coordinator import Coordinator
@@ -599,12 +599,17 @@ async def get_location(session_id: str = "default"):
     return JSONResponse({"location": loc})
 
 
+@app.get("/api/version")
+async def api_version():
+    """Single source of truth for the OmniAgent version. All platforms read this."""
+    return PlainTextResponse(VERSION)
+
 @app.get("/api/identify")
 async def identify():
     """Identification endpoint for network discovery by mobile apps."""
     return JSONResponse({
         "service": "OmniAgent",
-        "version": "8.0",
+        "version": VERSION,
         "capabilities": list(TOOL_REGISTRY.keys()),
         "agents": list(SPECIALIST_REGISTRY.keys()),
         "models": dict(EXPERTS),
@@ -1928,7 +1933,7 @@ async def api_server_status():
     """Comprehensive server status for all subsystems."""
     from src.config import BITNET_ENABLED, EXPERTS, OLLAMA_NUM_CTX
     status = {
-        "version": "8.5.0",
+        "version": VERSION,
         "server": "running",
         "ollama": False,
         "bitnet": BITNET_ENABLED,

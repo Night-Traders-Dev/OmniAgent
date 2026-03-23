@@ -1,5 +1,10 @@
 import os
+from pathlib import Path
 from openai import OpenAI
+
+# Single source of truth — read from VERSION file at project root
+_version_file = Path(__file__).resolve().parent.parent / "VERSION"
+VERSION = _version_file.read_text().strip() if _version_file.exists() else "0.0.0"
 
 os.environ["OLLAMA_MAX_LOADED_MODELS"] = "1"
 

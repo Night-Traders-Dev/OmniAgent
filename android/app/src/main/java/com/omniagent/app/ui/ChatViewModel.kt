@@ -94,6 +94,8 @@ data class ChatUiState(
     val onDeviceNPU: String = "",
     val smartReplies: List<String> = emptyList(),
     val onDeviceEnabled: Boolean = true,
+    // Server version (fetched from /api/version)
+    val serverVersion: String = "...",
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -749,6 +751,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val models = api.getModels().mapNotNull { it.get("name")?.asString ?: it.get("model")?.asString }
                 _state.update { it.copy(installedModels = models) }
+            } catch (_: Exception) {}
+            // Fetch server version from single source of truth
+            try {
+                val ver = api.getVersion()
+                if (ver.isNotBlank()) _state.update { it.copy(serverVersion = ver) }
             } catch (_: Exception) {}
         }
     }

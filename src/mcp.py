@@ -542,9 +542,11 @@ INTERNAL_ERROR = -32603
 # MCP Server — handles JSON-RPC messages
 # ============================================================
 
+from src.config import VERSION as _VERSION
+
 SERVER_INFO = {
     "name": "omniagent",
-    "version": "8.5.0",
+    "version": _VERSION,
 }
 
 SERVER_CAPABILITIES = {
@@ -887,7 +889,7 @@ class MCPClient:
         init_result = await self._request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "omniagent", "version": "8.5.0"},
+            "clientInfo": {"name": "omniagent", "version": _VERSION},
         })
         log.info(f"MCP client: connected to {init_result.get('serverInfo', {}).get('name', 'unknown')}")
 
@@ -923,7 +925,7 @@ class MCPClient:
         init_result = await self._sse_request("initialize", {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": {"name": "omniagent", "version": "8.5.0"},
+            "clientInfo": {"name": "omniagent", "version": _VERSION},
         })
         log.info(f"MCP client (SSE): connected to {init_result.get('serverInfo', {}).get('name', 'unknown')}")
 

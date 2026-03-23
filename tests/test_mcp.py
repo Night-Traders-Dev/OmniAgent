@@ -116,7 +116,7 @@ class TestMCPProtocolHandler:
         r = self._init()
         assert r["result"]["protocolVersion"] == "2024-11-05"
         assert r["result"]["serverInfo"]["name"] == "omniagent"
-        assert r["result"]["serverInfo"]["version"] == "8.5.0"
+        from src.config import VERSION as _V; assert r["result"]["serverInfo"]["version"] == _V
 
     def test_initialize_capabilities(self):
         r = self._init()
@@ -355,7 +355,7 @@ class TestServerInfo:
         assert SERVER_INFO["name"] == "omniagent"
 
     def test_server_version(self):
-        assert SERVER_INFO["version"] == "8.5.0"
+        from src.config import VERSION as _V2; assert SERVER_INFO["version"] == _V2
 
     def test_capabilities(self):
         assert "tools" in SERVER_CAPABILITIES
