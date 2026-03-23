@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <time.h>
+#include <math.h>
 #include <pthread.h>
 #include <curl/curl.h>
 #include "keyboard.h"
@@ -415,10 +416,12 @@ static void *send_message_thread(void *arg) {
                 messages[msg_count].is_user = false;
                 msg_count++;
             }
-            /* If reply contains weather data, update the widget */
-            const char *raw = strstr(reply, "RAW_JSON:");
-            if (raw) {
-                parse_weather_json(raw);
+            /* If reply looks like weather data, refresh the widget */
+            if (strstr(reply, "°F") || strstr(reply, "°C") ||
+                strstr(reply, "temperature") || strstr(reply, "weather") ||
+                strstr(reply, "forecast") || strstr(reply, "humidity")) {
+                /* Trigger a fresh weather fetch on next frame */
+                last_weather_time = 0;
             }
         }
         free(resp);
@@ -662,88 +665,130 @@ static void draw_sidebar(void) {
     }
 }
 
+/* Chat bubble colors — vivid, warm, fit the animated bg */
+static const Color COL_USER_BUBBLE  = {70, 120, 200, 230};  /* Rich blue glass */
+static const Color COL_USER_GLOW    = {90, 140, 220, 40};   /* Soft glow behind user bubble */
+static const Color COL_ASST_BUBBLE  = {25, 32, 50, 210};    /* Deep frosted glass */
+static const Color COL_ASST_GLOW    = {60, 80, 140, 30};    /* Subtle purple glow */
+static const Color COL_ASST_ACCENT  = {100, 140, 220, 60};  /* Left accent bar */
+
 static void draw_chat(void) {
     int cx = SIDEBAR_W;
     int cy = TOPBAR_H;
     int cw = screen_w - SIDEBAR_W;
     int ch = screen_h - TOPBAR_H - INPUT_H;
+    int kb_h = kb_get_height(&vkb);
+    if (kb_h > 0) ch -= kb_h;
 
-    /* Chat area — transparent, animated bg shows through */
-    fill_rect(cx, cy, cw, ch, (Color){8, 10, 18, 100});
+    /* Chat area — very subtle overlay so bg shows through */
+    fill_rect(cx, cy, cw, ch, (Color){6, 8, 16, 60});
 
-    /* Messages */
-    int y = cy + 8 - scroll_offset;
+    /* Clip region (don't draw outside chat area) */
+    SDL_Rect clip = {cx, cy, cw, ch};
+    SDL_RenderSetClipRect(renderer, &clip);
+
+    /* Messages — bigger font, more padding, more color */
+    int y = cy + 16 - scroll_offset;
+    int padding = 16;
+    int bubble_radius = 14;
+
     for (int i = 0; i < msg_count; i++) {
-        Color bg = messages[i].is_user ? COL_USER_BG : COL_ASST_BG;
-        Color fg = messages[i].is_user ? (Color){0,0,0,255} : COL_TEXT;
-        int max_w = cw - 80;
+        bool is_user = messages[i].is_user;
+        Color bubble_bg = is_user ? COL_USER_BUBBLE : COL_ASST_BUBBLE;
+        Color glow = is_user ? COL_USER_GLOW : COL_ASST_GLOW;
+        Color fg = is_user ? (Color){240, 245, 255, 255} : COL_TEXT;
+        int max_w = cw - 100;
 
-        /* Measure text height */
-        int tw, th;
+        /* Render text with the regular font (bigger than before) */
         SDL_Color sc = {fg.r, fg.g, fg.b, fg.a};
-        SDL_Surface *surf = TTF_RenderUTF8_Blended_Wrapped(font_small, messages[i].text, sc, max_w - 20);
+        SDL_Surface *surf = TTF_RenderUTF8_Blended_Wrapped(font_regular, messages[i].text, sc, max_w - padding * 2);
         if (!surf) continue;
-        tw = surf->w;
-        th = surf->h;
+        int tw = surf->w;
+        int th = surf->h;
 
-        int bx = messages[i].is_user ? cx + cw - tw - 36 : cx + 12;
+        int bw = tw + padding * 2 + 4;
+        int bh = th + padding * 2;
+        int bx = is_user ? cx + cw - bw - 20 : cx + 20;
         int by = y;
-        int bw = tw + 24;
-        int bh = th + 16;
 
-        if (by + bh > cy && by < cy + ch) {
-            draw_rounded_rect(bx, by, bw, bh, 10, bg);
-            if (!messages[i].is_user) {
-                /* Border for assistant */
-                set_color(COL_BORDER);
-                SDL_Rect br = {bx, by, bw, bh};
-                SDL_RenderDrawRect(renderer, &br);
-            }
-            SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
-            SDL_Rect dst = {bx + 12, by + 8, tw, th};
-            SDL_RenderCopy(renderer, tex, NULL, &dst);
-            SDL_DestroyTexture(tex);
+        /* Glow behind bubble (soft shadow/ambient light) */
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        draw_rounded_rect(bx - 3, by - 3, bw + 6, bh + 6, bubble_radius + 3, glow);
+
+        /* Bubble background */
+        draw_rounded_rect(bx, by, bw, bh, bubble_radius, bubble_bg);
+
+        /* Assistant accent bar on left edge */
+        if (!is_user) {
+            fill_rect(bx, by + 6, 3, bh - 12, COL_ASST_ACCENT);
         }
+
+        /* Text */
+        SDL_Texture *tex = SDL_CreateTextureFromSurface(renderer, surf);
+        SDL_Rect dst = {bx + padding + (is_user ? 0 : 4), by + padding, tw, th};
+        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+        SDL_RenderCopy(renderer, tex, NULL, &dst);
+        SDL_DestroyTexture(tex);
         SDL_FreeSurface(surf);
-        y += th + 24;
+
+        y += bh + 14;
     }
 
-    /* Sending indicator */
+    /* Sending indicator — pulsing */
     if (is_sending) {
-        draw_text(font_small, "Thinking...", cx + 16, y, COL_DIM);
+        float pulse = 0.5f + 0.5f * sinf((float)SDL_GetTicks() * 0.005f);
+        Uint8 alpha = (Uint8)(120 + pulse * 135);
+        Color think_c = {COL_ACCENT.r, COL_ACCENT.g, COL_ACCENT.b, alpha};
+        draw_rounded_rect(cx + 20, y, 140, 36, 12, COL_ASST_BUBBLE);
+        draw_text(font_regular, "Thinking...", cx + 36, y + 8, think_c);
     }
+
+    SDL_RenderSetClipRect(renderer, NULL); /* Remove clip */
 }
 
 static void draw_input_bar(void) {
-    int iy = screen_h - INPUT_H;
-    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, INPUT_H, COL_SURFACE);
-    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, 1, COL_BORDER);
+    int kb_h = kb_get_height(&vkb);
+    int iy = screen_h - INPUT_H - kb_h;
+    /* Frosted glass bar */
+    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, INPUT_H, (Color){12, 16, 26, 200});
+    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, 1, (Color){60, 80, 120, 40});
 
-    /* Input field */
-    int fx = SIDEBAR_W + 12;
+    /* Input field — larger, glassy */
+    int fx = SIDEBAR_W + 16;
     int fy = iy + 8;
-    int fw = screen_w - SIDEBAR_W - 80;
+    int fw = screen_w - SIDEBAR_W - 88;
     int fh = INPUT_H - 16;
 
-    draw_rounded_rect(fx, fy, fw, fh, 16, COL_CARD);
+    /* Glow when active */
     if (input_active) {
-        set_color(COL_ACCENT);
-        SDL_Rect br = {fx, fy, fw, fh};
-        SDL_RenderDrawRect(renderer, &br);
+        draw_rounded_rect(fx - 2, fy - 2, fw + 4, fh + 4, 22, (Color){80, 130, 220, 30});
     }
+    draw_rounded_rect(fx, fy, fw, fh, 20, (Color){20, 28, 44, 220});
 
     if (input_text[0]) {
-        draw_text(font_regular, input_text, fx + 14, fy + 8, COL_TEXT);
+        draw_text(font_regular, input_text, fx + 18, fy + 10, COL_TEXT);
     } else {
-        draw_text(font_regular, "Ask OmniAgent...", fx + 14, fy + 8, COL_DIM);
+        draw_text(font_regular, "Ask OmniAgent...", fx + 18, fy + 10, (Color){80, 100, 130, 180});
     }
 
-    /* Send button */
-    int bx = screen_w - 56;
+    /* Cursor blink when active */
+    if (input_active && (SDL_GetTicks() / 500) % 2 == 0) {
+        int tw = 0;
+        if (input_text[0]) TTF_SizeUTF8(font_regular, input_text, &tw, NULL);
+        fill_rect(fx + 18 + tw, fy + 8, 2, fh - 16, COL_ACCENT);
+    }
+
+    /* Send button — circular, glowing when ready */
+    int bx = screen_w - 60;
     int by = iy + 8;
-    Color btn_c = (input_text[0] && !is_sending) ? COL_ACCENT : COL_BORDER;
-    draw_rounded_rect(bx, by, 44, 40, 20, btn_c);
-    draw_text(font_regular, ">", bx + 16, by + 8, is_sending ? COL_DIM : COL_BG);
+    bool ready = input_text[0] && !is_sending;
+    if (ready) {
+        draw_rounded_rect(bx - 2, by - 2, 52, 44, 24, (Color){80, 140, 230, 40});
+    }
+    Color btn_c = ready ? COL_ACCENT : (Color){30, 40, 60, 180};
+    draw_rounded_rect(bx, by, 48, 40, 20, btn_c);
+    Color arrow_c = ready ? (Color){10, 15, 25, 255} : COL_DIM;
+    draw_text(font_large, ">", bx + 14, by + 6, arrow_c);
 }
 
 static void draw_connect_dialog(void) {
@@ -994,32 +1039,52 @@ int main(int argc, char *argv[]) {
         renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
     }
 
-    /* Load fonts — try common locations */
+    /* Load fonts — prefer bundled Nunito (rounded, modern), fallback to system */
+    /* Resolve path relative to executable */
+    char font_dir[512];
+    {
+        /* Try relative to binary location */
+        const char *base = SDL_GetBasePath();
+        if (base) {
+            snprintf(font_dir, sizeof(font_dir), "%s../fonts/Nunito.ttf", base);
+            SDL_free((void*)base);
+        } else {
+            font_dir[0] = '\0';
+        }
+    }
+
     const char *font_paths[] = {
+        font_dir,  /* bundled Nunito (relative to binary) */
+        "fonts/Nunito.ttf",  /* CWD-relative */
+        "../fonts/Nunito.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  /* bold fallback */
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/noto/NotoSans-Regular.ttf",
         NULL
     };
     const char *font_path = NULL;
-    for (int i = 0; font_paths[i]; i++) {
-        if (TTF_OpenFont(font_paths[i], 14)) {
+    for (int i = 0; font_paths[i] && font_paths[i][0]; i++) {
+        TTF_Font *test = TTF_OpenFont(font_paths[i], 14);
+        if (test) {
+            TTF_CloseFont(test);
             font_path = font_paths[i];
+            printf("[Hub] Font: %s\n", font_path);
             break;
         }
     }
-    if (!font_path) font_path = font_paths[0]; /* fallback */
+    if (!font_path) font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
-    font_small   = TTF_OpenFont(font_path, 12);
-    font_regular = TTF_OpenFont(font_path, 16);
-    font_large   = TTF_OpenFont(font_path, 22);
-    font_huge    = TTF_OpenFont(font_path, 36);
+    font_small   = TTF_OpenFont(font_path, 13);
+    font_regular = TTF_OpenFont(font_path, 17);
+    font_large   = TTF_OpenFont(font_path, 24);
+    font_huge    = TTF_OpenFont(font_path, 40);
 
     if (!font_regular) {
         fprintf(stderr, "Failed to load font from %s: %s\n", font_path, TTF_GetError());
         fprintf(stderr, "Install: sudo apt install fonts-dejavu-core\n");
+        fprintf(stderr, "Or place Nunito.ttf in smarthub/fonts/\n");
         return 1;
     }
 
