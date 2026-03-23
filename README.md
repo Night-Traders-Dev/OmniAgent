@@ -1,4 +1,4 @@
-# OmniAgent v8.3
+# OmniAgent v8.4
 
 **Fully local, autonomous AI agent framework** — 47 tools, 7 specialist agents, multi-phase task execution, running entirely on your hardware with no cloud API keys required.
 
@@ -8,7 +8,7 @@
 |----------|--------|----------|
 | **WebUI** | Production | `http://localhost:8000` |
 | **Android** | Production | `android/app/build/outputs/apk/debug/app-debug.apk` |
-| **Linux Desktop** | Production | `desktop/src-tauri/target/release/bundle/deb/OmniAgent_8.3.0_amd64.deb` |
+| **Linux Desktop** | Production | `desktop/src-tauri/target/release/bundle/deb/OmniAgent_8.4.0_amd64.deb` |
 | **GPU Worker** | Optional | `gpu_worker.py` (second PC) |
 
 ## Quick Start
@@ -186,7 +186,7 @@ OmniAgent/
 ├── Dockerfile             # Container image
 ├── omniagent.service      # systemd auto-start
 ├── setup-gpu-worker-wsl.ps1  # Windows WSL2 setup script
-├── CHANGELOG.md           # Full version history (v7.0 → v8.3)
+├── CHANGELOG.md           # Full version history (v7.0 → v8.4)
 └── .gitignore             # Comprehensive exclusions
 ```
 

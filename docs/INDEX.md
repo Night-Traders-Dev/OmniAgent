@@ -1,4 +1,4 @@
-# OmniAgent v8.3 — Documentation
+# OmniAgent v8.4 — Documentation
 
 ## Guides
 
@@ -11,7 +11,7 @@
 | [Tool Reference](TOOLS.md) | All 47 tools with usage examples |
 | [API Reference](API.md) | All 147 REST endpoints |
 | [GPU Worker](GPU_WORKER.md) | Second PC setup for offloading |
-| [Changelog](../CHANGELOG.md) | Full version history (v7.0 → v8.3) |
+| [Changelog](../CHANGELOG.md) | Full version history (v7.0 → v8.4) |
 
 ## Quick Links
 
@@ -23,15 +23,16 @@
 ## System Stats
 
 ```
-Backend:    12,269 lines across 29 Python modules
-WebUI:      2,169 lines (single HTML file)
-Android:    4,851 lines across 11 Kotlin files
-Desktop:    Tauri (Rust + WebView, 9.3MB binary)
+Backend:    12,400+ lines across 29 Python modules
+WebUI:      2,200+ lines (single HTML file)
+Android:    4,900+ lines across 11 Kotlin files (with Gemini Nano)
+Desktop:    Tauri (Rust + WebView, 9.3MB binary, deb + rpm)
 VS Code:    Extension scaffold (Ask, Explain, Fix, Review)
 Tools:      47 registered, all with explicit timeouts
 Agents:     7 specialists (Reasoner, Coder, Researcher, Planner, ToolUser, Security, Fast)
-Endpoints:  147 REST + 1 WebSocket
+Endpoints:  148 REST + 1 WebSocket
 DB Tables:  14 (SQLite with Fernet encryption)
 Tests:      319 total (88 integration, all passing)
 Platforms:  4 (WebUI, Android, Linux Desktop, VS Code)
+On-device:  Gemini Nano (S24/S25/Pixel 8+) + TFLite NNAPI fallback
 ```

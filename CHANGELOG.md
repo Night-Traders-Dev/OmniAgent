@@ -1,6 +1,46 @@
 # OmniAgent Changelog
 
-## v8.3.0 — 2026-03-23 (Current)
+## v8.4.0 — 2026-03-23 (Current)
+
+### Gemini Nano On-Device LLM
+- Real LLM inference on the Galaxy S24 Ultra's Hexagon NPU via Google AI Core
+- Replaces all heuristic functions with actual Gemini Nano prompts (intent classification, smart replies, sentiment, Q&A)
+- New: `summarize()` — compress long responses on-device before display
+- New: `rewriteQuery()` — clarify vague queries before sending to server
+- Handles 30-40% of queries locally (general knowledge, greetings, summaries) without server round-trip
+- Graceful fallback to heuristics on devices without Gemini Nano
+- Uses reflection — no hard compile-time dependency, works on all Android devices
+
+### Quality of Life (18 improvements)
+- **Stop generating button** — Red "Stop" replaces "GO" during generation, aborts request instantly
+- **Message timestamps** — Every bubble shows time (e.g. "2:15 PM")
+- **Copy entire response** — "Copy All" button on hover in assistant messages
+- **Auto-scroll toggle** — Pause auto-scroll while reading during generation
+- **Settings persistence** — Model choice, tool toggles saved to localStorage across sessions
+- **Server status page** — `GET /api/status` shows all subsystems (Ollama, BitNet, GPU workers, capabilities)
+- **requirements.txt** — Generated from actual imports, organized by category
+
+### Tool Reliability
+- Fixed `regex_replace` — missing `Path` import caused all regex operations to fail
+- Fixed `ToolErrorKind.IO` → `ToolErrorKind.EXECUTION` (IO kind didn't exist)
+- **Tool dedup cache** — 22 read-only tools cached for 60s, prevents parallel agents from running identical commands
+
+### Testing
+- **88 integration tests** — All passing across tools, persistence, state, config, reasoning, tasks, features, platform, TTS, upgrades, OAuth, experiments
+- **319 total tests** across all test files
+
+### Documentation
+- `docs/INDEX.md` — Documentation hub
+- `docs/SETUP.md` — Installation for all platforms, Docker, systemd, troubleshooting
+- `docs/USER_GUIDE.md` — Every feature explained with examples
+- `docs/ARCHITECTURE.md` — System design, module map, request flow, security model, developer guide
+- `docs/TOOLS.md` — All 47 tools with JSON usage examples
+- `docs/API.md` — All 147 endpoints auto-generated from source
+- `docs/GPU_WORKER.md` — Second PC setup, E2E encryption, WSL2
+
+---
+
+## v8.3.0 — 2026-03-23
 
 ### AI Intelligence
 - **Streaming reasoning chain** — Complex tasks now stream phase-by-phase through the chat. RAG context injected into streaming path

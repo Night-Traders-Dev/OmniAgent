@@ -1,4 +1,4 @@
-# OmniAgent v8.3 — Setup & Installation Guide
+# OmniAgent v8.4 — Setup & Installation Guide
 
 ## Prerequisites
 
@@ -112,10 +112,10 @@ Or transfer the APK file to your phone and install manually.
 ./desktop/src-tauri/target/release/omniagent-desktop
 
 # Option 2: Install the deb package
-sudo dpkg -i desktop/src-tauri/target/release/bundle/deb/OmniAgent_8.3.0_amd64.deb
+sudo dpkg -i desktop/src-tauri/target/release/bundle/deb/OmniAgent_8.4.0_amd64.deb
 
 # Option 3: Install the RPM
-sudo rpm -i desktop/src-tauri/target/release/bundle/rpm/OmniAgent-8.3.0-1.x86_64.rpm
+sudo rpm -i desktop/src-tauri/target/release/bundle/rpm/OmniAgent-8.4.0-1.x86_64.rpm
 ```
 
 The desktop app requires the server to be running (`python omni_agent.py`).

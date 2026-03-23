@@ -1856,7 +1856,7 @@ async def api_server_status():
     """Comprehensive server status for all subsystems."""
     from src.config import BITNET_ENABLED, EXPERTS, OLLAMA_NUM_CTX
     status = {
-        "version": "8.3.0",
+        "version": "8.4.0",
         "server": "running",
         "ollama": False,
         "bitnet": BITNET_ENABLED,
