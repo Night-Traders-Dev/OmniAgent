@@ -32,7 +32,7 @@
 #define MAX_MSG_LEN 4096
 #define MAX_URL_LEN 1024
 #define POLL_INTERVAL_MS 5000
-#define WEATHER_INTERVAL_MS 900000 /* 15 min */
+#define WEATHER_INTERVAL_MS 300000 /* 5 min */
 
 /* ═══ Colors ═══ */
 typedef struct { Uint8 r, g, b, a; } Color;
@@ -111,6 +111,8 @@ static ServerMetrics metrics = {0};
 static Uint32 last_poll_time = 0;
 static Uint32 last_weather_time = 0;
 static bool running = true;
+static int screen_w = WINDOW_W;
+static int screen_h = WINDOW_H;
 
 /* Touch keyboard + Login */
 static Keyboard vkb;
@@ -453,8 +455,8 @@ static const QuickAction actions[] = {
 
 /* ═══ Drawing ═══ */
 static void draw_topbar(void) {
-    fill_rect(0, 0, WINDOW_W, TOPBAR_H, COL_SURFACE);
-    fill_rect(0, TOPBAR_H - 1, WINDOW_W, 1, COL_BORDER);
+    fill_rect(0, 0, screen_w, TOPBAR_H, COL_SURFACE);
+    fill_rect(0, TOPBAR_H - 1, screen_w, 1, COL_BORDER);
 
     /* Status dot */
     Color dot = metrics.connected ? COL_GREEN : COL_RED;
@@ -473,14 +475,14 @@ static void draw_topbar(void) {
     if (metrics.gpu_temp[0] && strcmp(metrics.gpu_temp, "--") != 0) {
         char gpu[64];
         snprintf(gpu, sizeof(gpu), "GPU %s", metrics.gpu_temp);
-        draw_text(font_small, gpu, WINDOW_W - 200, 16, COL_YELLOW);
+        draw_text(font_small, gpu, screen_w - 200, 16, COL_YELLOW);
     }
 
     time_t now = time(NULL);
     struct tm *t = localtime(&now);
     char timestr[32];
     strftime(timestr, sizeof(timestr), "%H:%M", t);
-    draw_text(font_regular, timestr, WINDOW_W - 70, 12, COL_DIM);
+    draw_text(font_regular, timestr, screen_w - 70, 12, COL_DIM);
 }
 
 static void draw_weather_widget(int x, int y, int w) {
@@ -568,8 +570,8 @@ static void draw_status_widget(int x, int y, int w) {
 }
 
 static void draw_sidebar(void) {
-    fill_rect(0, TOPBAR_H, SIDEBAR_W, WINDOW_H - TOPBAR_H, COL_SURFACE);
-    fill_rect(SIDEBAR_W - 1, TOPBAR_H, 1, WINDOW_H - TOPBAR_H, COL_BORDER);
+    fill_rect(0, TOPBAR_H, SIDEBAR_W, screen_h - TOPBAR_H, COL_SURFACE);
+    fill_rect(SIDEBAR_W - 1, TOPBAR_H, 1, screen_h - TOPBAR_H, COL_BORDER);
 
     int x = 8, y = TOPBAR_H + 8, w = SIDEBAR_W - 16;
     draw_weather_widget(x, y, w);
@@ -584,8 +586,8 @@ static void draw_sidebar(void) {
 static void draw_chat(void) {
     int cx = SIDEBAR_W;
     int cy = TOPBAR_H;
-    int cw = WINDOW_W - SIDEBAR_W;
-    int ch = WINDOW_H - TOPBAR_H - INPUT_H;
+    int cw = screen_w - SIDEBAR_W;
+    int ch = screen_h - TOPBAR_H - INPUT_H;
 
     fill_rect(cx, cy, cw, ch, COL_BG);
 
@@ -633,14 +635,14 @@ static void draw_chat(void) {
 }
 
 static void draw_input_bar(void) {
-    int iy = WINDOW_H - INPUT_H;
-    fill_rect(SIDEBAR_W, iy, WINDOW_W - SIDEBAR_W, INPUT_H, COL_SURFACE);
-    fill_rect(SIDEBAR_W, iy, WINDOW_W - SIDEBAR_W, 1, COL_BORDER);
+    int iy = screen_h - INPUT_H;
+    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, INPUT_H, COL_SURFACE);
+    fill_rect(SIDEBAR_W, iy, screen_w - SIDEBAR_W, 1, COL_BORDER);
 
     /* Input field */
     int fx = SIDEBAR_W + 12;
     int fy = iy + 8;
-    int fw = WINDOW_W - SIDEBAR_W - 80;
+    int fw = screen_w - SIDEBAR_W - 80;
     int fh = INPUT_H - 16;
 
     draw_rounded_rect(fx, fy, fw, fh, 16, COL_CARD);
@@ -657,7 +659,7 @@ static void draw_input_bar(void) {
     }
 
     /* Send button */
-    int bx = WINDOW_W - 56;
+    int bx = screen_w - 56;
     int by = iy + 8;
     Color btn_c = (input_text[0] && !is_sending) ? COL_ACCENT : COL_BORDER;
     draw_rounded_rect(bx, by, 44, 40, 20, btn_c);
@@ -668,11 +670,11 @@ static void draw_connect_dialog(void) {
     /* Overlay */
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     set_color((Color){0, 0, 0, 180});
-    SDL_Rect full = {0, 0, WINDOW_W, WINDOW_H};
+    SDL_Rect full = {0, 0, screen_w, screen_h};
     SDL_RenderFillRect(renderer, &full);
 
     int dw = 380, dh = 200;
-    int dx = (WINDOW_W - dw) / 2, dy = (WINDOW_H - dh) / 2;
+    int dx = (screen_w - dw) / 2, dy = (screen_h - dh) / 2;
 
     draw_rounded_rect(dx, dy, dw, dh, 12, COL_SURFACE);
 
@@ -695,7 +697,7 @@ static void draw_connect_dialog(void) {
 static void handle_touch(int x, int y) {
     if (show_connect_dialog) {
         int dw = 380, dh = 200;
-        int dx = (WINDOW_W - dw) / 2, dy = (WINDOW_H - dh) / 2;
+        int dx = (screen_w - dw) / 2, dy = (screen_h - dh) / 2;
 
         /* Input field */
         if (x >= dx + 20 && x <= dx + dw - 20 && y >= dy + 60 && y <= dy + 104) {
@@ -723,8 +725,16 @@ static void handle_touch(int x, int y) {
         return;
     }
 
-    /* Quick action buttons */
+    /* Sidebar touches */
     if (x < SIDEBAR_W) {
+        /* Weather widget tap — refresh now */
+        int wy = TOPBAR_H + 8;
+        if (y >= wy && y <= wy + 130) {
+            last_weather_time = 0; /* triggers fetch on next frame */
+            return;
+        }
+
+        /* Quick action buttons */
         int ax = 8, ay = TOPBAR_H + 8 + 138 + 98 + 28;
         int btn_w = (SIDEBAR_W - 32) / 2;
         int btn_h = 44;
@@ -751,9 +761,9 @@ static void handle_touch(int x, int y) {
 
     /* Input field */
     int kb_h = kb_get_height(&vkb);
-    int iy = WINDOW_H - INPUT_H - kb_h;
-    if (y >= iy && y < WINDOW_H - kb_h) {
-        if (x >= WINDOW_W - 56) {
+    int iy = screen_h - INPUT_H - kb_h;
+    if (y >= iy && y < screen_h - kb_h) {
+        if (x >= screen_w - 56) {
             /* Send button */
             send_message();
         } else {
@@ -882,11 +892,22 @@ int main(int argc, char *argv[]) {
 
     window = SDL_CreateWindow("OmniAgent Hub",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        WINDOW_W, WINDOW_H, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+        screen_w, screen_h,
+        SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI | SDL_WINDOW_FULLSCREEN_DESKTOP);
+    if (!window) {
+        /* Fallback to windowed if fullscreen fails */
+        window = SDL_CreateWindow("OmniAgent Hub",
+            SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+            screen_w, screen_h, SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI);
+    }
     if (!window) {
         fprintf(stderr, "Window failed: %s\n", SDL_GetError());
         return 1;
     }
+
+    /* Get actual window size (may differ from screen_w/H in fullscreen) */
+    SDL_GetWindowSize(window, &screen_w, &screen_h);
+    printf("[Hub] Display: %dx%d\n", screen_w, screen_h);
 
     renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!renderer) {
@@ -958,7 +979,7 @@ int main(int argc, char *argv[]) {
             }
 
             /* Virtual keyboard consumes touch events in its area */
-            if (kb_handle_event(&vkb, &event, WINDOW_W, WINDOW_H)) {
+            if (kb_handle_event(&vkb, &event, screen_w, screen_h)) {
                 /* Check if keyboard enter was pressed while on login screen */
                 if (!vkb.visible && login_state.active && login_state.focused_field == LOGIN_FIELD_PASSWORD) {
                     login_attempt(&login_state, server_url);
@@ -968,7 +989,7 @@ int main(int argc, char *argv[]) {
 
             /* Login screen consumes all events when active */
             if (login_state.active) {
-                if (login_handle_event(&login_state, &vkb, &event, WINDOW_W, WINDOW_H)) {
+                if (login_handle_event(&login_state, &vkb, &event, screen_w, screen_h)) {
                     /* Check if login button was tapped (field is NONE after tap) */
                     if (login_state.focused_field == LOGIN_FIELD_NONE
                         && login_state.username[0] && login_state.password[0]
@@ -983,11 +1004,11 @@ int main(int argc, char *argv[]) {
             if (show_connect_dialog) {
                 int tx = -1, ty = -1;
                 if (event.type == SDL_MOUSEBUTTONDOWN) { tx = event.button.x; ty = event.button.y; }
-                else if (event.type == SDL_FINGERDOWN) { tx = (int)(event.tfinger.x * WINDOW_W); ty = (int)(event.tfinger.y * WINDOW_H); }
+                else if (event.type == SDL_FINGERDOWN) { tx = (int)(event.tfinger.x * screen_w); ty = (int)(event.tfinger.y * screen_h); }
 
                 if (tx >= 0) {
                     int dw = 380, dh = 200;
-                    int dx = (WINDOW_W - dw) / 2, dy = (WINDOW_H - dh) / 2;
+                    int dx = (screen_w - dw) / 2, dy = (screen_h - dh) / 2;
                     /* URL input field — attach keyboard */
                     if (tx >= dx + 20 && tx <= dx + dw - 20 && ty >= dy + 60 && ty <= dy + 104) {
                         kb_attach(&vkb, connect_url_input, &connect_cursor, sizeof(connect_url_input));
@@ -1020,7 +1041,7 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (event.type == SDL_KEYDOWN && !vkb.visible) {
                     if (event.key.keysym.sym == SDLK_RETURN) {
-                        handle_touch(WINDOW_W/2, WINDOW_H/2 + 40);
+                        handle_touch(screen_w/2, screen_h/2 + 40);
                     } else if (event.key.keysym.sym == SDLK_BACKSPACE) {
                         size_t len = strlen(connect_url_input);
                         if (len > 0) connect_url_input[len - 1] = '\0';
@@ -1035,8 +1056,8 @@ int main(int argc, char *argv[]) {
             case SDL_FINGERDOWN: {
                 int tx, ty;
                 if (event.type == SDL_FINGERDOWN) {
-                    tx = (int)(event.tfinger.x * WINDOW_W);
-                    ty = (int)(event.tfinger.y * WINDOW_H);
+                    tx = (int)(event.tfinger.x * screen_w);
+                    ty = (int)(event.tfinger.y * screen_h);
                 } else {
                     tx = event.button.x;
                     ty = event.button.y;
@@ -1081,7 +1102,8 @@ int main(int argc, char *argv[]) {
                 last_poll_time = now;
                 fetch_metrics();
             }
-            if (now - last_weather_time > WEATHER_INTERVAL_MS) {
+            /* Fetch weather: immediately on first frame after login, then every 15 min */
+            if (last_weather_time == 0 || now - last_weather_time > WEATHER_INTERVAL_MS) {
                 last_weather_time = now;
                 fetch_weather();
             }
@@ -1093,17 +1115,17 @@ int main(int argc, char *argv[]) {
 
         if (show_connect_dialog) {
             draw_connect_dialog();
-            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
+            kb_render(&vkb, renderer, font_regular, font_small, screen_w, screen_h);
         } else if (login_state.active) {
             login_render(&login_state, renderer, font_regular, font_small, font_large,
-                         WINDOW_W, WINDOW_H);
-            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
+                         screen_w, screen_h);
+            kb_render(&vkb, renderer, font_regular, font_small, screen_w, screen_h);
         } else {
             draw_topbar();
             draw_sidebar();
             draw_chat();
             draw_input_bar();
-            kb_render(&vkb, renderer, font_regular, font_small, WINDOW_W, WINDOW_H);
+            kb_render(&vkb, renderer, font_regular, font_small, screen_w, screen_h);
         }
 
         SDL_RenderPresent(renderer);
