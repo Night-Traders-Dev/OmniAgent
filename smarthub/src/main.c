@@ -28,7 +28,7 @@
 #define FPS 30
 #define MAX_MESSAGES 100
 #define MAX_MSG_LEN 4096
-#define MAX_URL_LEN 512
+#define MAX_URL_LEN 1024
 #define POLL_INTERVAL_MS 5000
 #define WEATHER_INTERVAL_MS 900000 /* 15 min */
 
@@ -241,6 +241,7 @@ static void draw_text(TTF_Font *f, const char *text, int x, int y, Color c) {
     SDL_DestroyTexture(tex);
 }
 
+__attribute__((unused))
 static void draw_text_wrapped(TTF_Font *f, const char *text, int x, int y, int max_w, Color c) {
     if (!text || !text[0]) return;
     SDL_Color sc = {c.r, c.g, c.b, c.a};
@@ -273,7 +274,7 @@ static const char *weather_icon(const char *cond) {
 
 /* ═══ API calls ═══ */
 static void fetch_metrics(void) {
-    char url[MAX_URL_LEN];
+    char url[MAX_URL_LEN + 64];
     snprintf(url, sizeof(url), "%s/api/identify", server_url);
     char *resp = http_get(url);
     if (resp) {
@@ -307,7 +308,7 @@ static void fetch_metrics(void) {
 }
 
 static void fetch_weather(void) {
-    char url[MAX_URL_LEN + 256];
+    char url[MAX_URL_LEN + 64];
     /* Use MCP to call weather tool */
     snprintf(url, sizeof(url), "%s/mcp", server_url);
     char *resp = http_post(url,
@@ -359,7 +360,7 @@ static void *send_message_thread(void *arg) {
         json_get_string(resp, "reply", reply, sizeof(reply));
         if (reply[0]) {
             if (msg_count < MAX_MESSAGES) {
-                strncpy(messages[msg_count].text, reply, MAX_MSG_LEN - 1);
+                snprintf(messages[msg_count].text, MAX_MSG_LEN, "%s", reply);
                 messages[msg_count].is_user = false;
                 msg_count++;
             }
@@ -382,7 +383,7 @@ static void send_message(void) {
 
     /* Add user message */
     if (msg_count < MAX_MESSAGES) {
-        strncpy(messages[msg_count].text, input_text, MAX_MSG_LEN - 1);
+        snprintf(messages[msg_count].text, MAX_MSG_LEN, "%s", input_text);
         messages[msg_count].is_user = true;
         msg_count++;
     }

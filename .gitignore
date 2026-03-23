@@ -169,6 +169,9 @@ build/
 !gpu_worker.py
 !setup-gpu-worker-wsl.ps1
 
+# ── Smart Hub (native build) ────────────────────────────────
+smarthub/build/
+
 # ── Misc ─────────────────────────────────────────────────────
 *.bak
 *.tmp

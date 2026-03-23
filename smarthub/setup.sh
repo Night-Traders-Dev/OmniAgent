@@ -5,6 +5,9 @@
 # Hardware: SpacemiT K1 (8-core RISC-V), 2 TOPS NPU, 8GB RAM
 # OS:       Ubuntu 24.04 (RISC-V)
 # Display:  7" Touchscreen
+#
+# Builds a native C application (SDL2 + libcurl) for maximum
+# responsiveness on the touchscreen. No browser needed.
 # ============================================================
 set -e
 
@@ -19,74 +22,70 @@ INSTALL_DIR="$HOME/omniagent-hub"
 echo "[1/6] Installing system packages..."
 sudo apt-get update
 sudo apt-get install -y \
-    chromium-browser \
-    xdotool \
-    unclutter \
+    build-essential cmake pkg-config \
+    libsdl2-dev libsdl2-ttf-dev libcurl4-openssl-dev \
+    fonts-dejavu-core fonts-noto-color-emoji \
     pulseaudio \
-    python3 python3-pip python3-venv \
-    xinput \
-    xserver-xorg-input-evdev \
-    fonts-noto-color-emoji
+    unclutter \
+    xinput xdotool \
+    xserver-xorg-input-evdev
 
-# ── 2. Touchscreen calibration ─────────────────────────────
-echo "[2/6] Configuring touchscreen..."
-# Auto-detect touchscreen device
+# ── 2. Build Smart Hub ─────────────────────────────────────
+echo "[2/6] Building native Smart Hub..."
+cd "$SCRIPT_DIR"
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+
+# ── 3. Install ──────────────────────────────────────────────
+echo "[3/6] Installing..."
+mkdir -p "$INSTALL_DIR"
+cp build/omni-hub "$INSTALL_DIR/"
+
+# Create launcher script
+cat > "$INSTALL_DIR/start-hub.sh" << 'LAUNCHER'
+#!/bin/bash
+# Wait for display server
+while ! xdotool getactivewindow &>/dev/null 2>&1; do sleep 1; done
+
+# Hide cursor after 3s of inactivity
+unclutter -idle 3 &
+
+# Disable screen blanking
+xset s off 2>/dev/null
+xset -dpms 2>/dev/null
+xset s noblank 2>/dev/null
+
+# Set display brightness (if supported)
+for bl in /sys/class/backlight/*/brightness; do
+    echo 200 | sudo tee "$bl" 2>/dev/null
+done
+
+# Launch Smart Hub (pass server URL if saved)
+SAVED_URL=""
+if [ -f "$HOME/.omniagent-hub-url" ]; then
+    SAVED_URL=$(cat "$HOME/.omniagent-hub-url")
+fi
+
+exec "$HOME/omniagent-hub/omni-hub" $SAVED_URL
+LAUNCHER
+chmod +x "$INSTALL_DIR/start-hub.sh"
+
+# ── 4. Touchscreen calibration ─────────────────────────────
+echo "[4/6] Configuring touchscreen..."
 TOUCH_DEV=$(xinput list --name-only 2>/dev/null | grep -i "touch" | head -1)
 if [ -n "$TOUCH_DEV" ]; then
     echo "  Found touchscreen: $TOUCH_DEV"
-    # Map to correct display (for single-display setups this is automatic)
-    xinput map-to-output "$TOUCH_DEV" "$(xrandr | grep ' connected' | head -1 | cut -d' ' -f1)" 2>/dev/null || true
+    DISPLAY_NAME=$(xrandr 2>/dev/null | grep ' connected' | head -1 | cut -d' ' -f1)
+    if [ -n "$DISPLAY_NAME" ]; then
+        xinput map-to-output "$TOUCH_DEV" "$DISPLAY_NAME" 2>/dev/null || true
+        echo "  Mapped to display: $DISPLAY_NAME"
+    fi
 else
     echo "  No touchscreen detected (will work with mouse)"
 fi
 
-# ── 3. Copy Smart Hub files ────────────────────────────────
-echo "[3/6] Setting up Smart Hub..."
-mkdir -p "$INSTALL_DIR"
-cp "$SCRIPT_DIR/index.html" "$INSTALL_DIR/"
-
-# Generate kiosk launcher
-cat > "$INSTALL_DIR/start-hub.sh" << 'LAUNCHER'
-#!/bin/bash
-# Kill any existing chromium
-pkill -f "chromium.*kiosk" 2>/dev/null || true
-
-# Wait for X server
-while ! xdotool getactivewindow &>/dev/null; do sleep 1; done
-
-# Hide cursor after 3 seconds of inactivity
-unclutter -idle 3 &
-
-# Disable screen blanking
-xset s off
-xset -dpms
-xset s noblank
-
-# Set display brightness (if supported)
-echo 200 | sudo tee /sys/class/backlight/*/brightness 2>/dev/null || true
-
-# Launch Chromium in kiosk mode
-exec chromium-browser \
-    --kiosk \
-    --noerrdialogs \
-    --disable-infobars \
-    --disable-session-crashed-bubble \
-    --disable-component-update \
-    --check-for-update-interval=31536000 \
-    --disable-features=TranslateUI \
-    --overscroll-history-navigation=0 \
-    --autoplay-policy=no-user-gesture-required \
-    --enable-features=OverlayScrollbar \
-    --disable-pinch \
-    --touch-events=enabled \
-    --enable-touch-drag-drop \
-    --user-data-dir="$HOME/.config/omniagent-hub" \
-    "file://$HOME/omniagent-hub/index.html"
-LAUNCHER
-chmod +x "$INSTALL_DIR/start-hub.sh"
-
-# ── 4. Autostart on boot ──────────────────────────────────
-echo "[4/6] Configuring autostart..."
+# ── 5. Autostart on boot ──────────────────────────────────
+echo "[5/6] Configuring autostart..."
 mkdir -p "$HOME/.config/autostart"
 cat > "$HOME/.config/autostart/omniagent-hub.desktop" << EOF
 [Desktop Entry]
@@ -96,10 +95,10 @@ Exec=$INSTALL_DIR/start-hub.sh
 X-GNOME-Autostart-enabled=true
 Hidden=false
 NoDisplay=false
-Comment=OmniAgent touch-based Smart Hub
+Comment=OmniAgent native touch-based Smart Hub
 EOF
 
-# Also create a systemd user service as fallback
+# Systemd user service as fallback
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/omniagent-hub.service" << EOF
 [Unit]
@@ -119,45 +118,26 @@ EOF
 systemctl --user daemon-reload
 systemctl --user enable omniagent-hub.service 2>/dev/null || true
 
-# ── 5. NPU setup (SpacemiT K1) ────────────────────────────
-echo "[5/6] Setting up NPU..."
-# Check for SpacemiT NPU device
+# ── 6. NPU setup (SpacemiT K1) ────────────────────────────
+echo "[6/6] Checking NPU..."
 if [ -e "/dev/spacemit-npu" ] || [ -e "/dev/npu" ] || [ -d "/sys/class/npu" ]; then
-    echo "  NPU device detected"
-    # Install SpacemiT AI SDK if available
-    if command -v spacemit-ai &>/dev/null; then
-        echo "  SpacemiT AI SDK already installed"
-    else
-        echo "  SpacemiT AI SDK not found — NPU will be used if SDK is installed later"
-        echo "  Install from: https://developer.spacemit.com/"
-    fi
+    echo "  NPU device detected — available for future local inference"
 else
-    echo "  No NPU device found — using CPU for local inference"
+    echo "  No NPU device node found (may need SpacemiT AI SDK)"
+    echo "  Install from: https://developer.spacemit.com/"
 fi
-
-# Install ONNX Runtime for local inference (CPU fallback)
-pip3 install --user onnxruntime 2>/dev/null || echo "  ONNX Runtime install skipped (may not support RISC-V yet)"
-
-# ── 6. Audio setup ─────────────────────────────────────────
-echo "[6/6] Configuring audio..."
-# Enable PulseAudio for mic + speaker
-pulseaudio --check 2>/dev/null || pulseaudio --start 2>/dev/null || true
 
 # ── Done ───────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════"
 echo "  Setup complete!"
 echo ""
-echo "  Hub location:  $INSTALL_DIR"
-echo "  Start command: $INSTALL_DIR/start-hub.sh"
-echo "  Autostart:     enabled (reboots into kiosk)"
+echo "  Binary:    $INSTALL_DIR/omni-hub"
+echo "  Launcher:  $INSTALL_DIR/start-hub.sh"
+echo "  Autostart: enabled (boots into hub)"
 echo ""
-echo "  First launch:"
-echo "    1. Reboot:  sudo reboot"
-echo "    2. Hub opens in kiosk mode on the touchscreen"
-echo "    3. Enter your OmniAgent server IP (e.g. 192.168.1.100:8000)"
-echo "    4. Or tap 'Scan Network' to auto-discover"
+echo "  Run now:   $INSTALL_DIR/omni-hub"
+echo "  With URL:  $INSTALL_DIR/omni-hub 192.168.1.100:8000"
 echo ""
-echo "  Manual start:  $INSTALL_DIR/start-hub.sh"
-echo "  Quit kiosk:    Alt+F4 or ssh in and run: pkill chromium"
+echo "  Quit:      Press Escape or Ctrl+C"
 echo "═══════════════════════════════════════════════"
