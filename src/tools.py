@@ -772,9 +772,28 @@ def _geocode(location: str) -> tuple[float, float, str] | None:
         return None
 
 
+def _geolocate_ip() -> tuple | None:
+    """Get approximate location from public IP using ip-api.com (no key needed)."""
+    try:
+        req = urllib.request.Request("http://ip-api.com/json/?fields=lat,lon,city,regionName,country",
+                                     headers={"User-Agent": "OmniAgent/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        if data.get("city"):
+            return (data["lat"], data["lon"], f"{data['city']}, {data.get('regionName', '')}")
+    except Exception:
+        pass
+    return None
+
 def get_weather(location: str, forecast_days: int = 3) -> str:
     try:
-        geo = _geocode(location)
+        # Handle "auto" — detect location from IP
+        if not location or location.lower() in ("auto", "here", "my location", "current"):
+            geo = _geolocate_ip()
+            if not geo:
+                return json.dumps({"error": "Could not detect your location. Please specify a city name."})
+        else:
+            geo = _geocode(location)
         if not geo:
             return json.dumps({"error": f"Could not find location: {location}"})
         lat, lon, place_name = geo

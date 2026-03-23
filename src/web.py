@@ -599,6 +599,15 @@ async def get_location(session_id: str = "default"):
     return JSONResponse({"location": loc})
 
 
+@app.get("/api/location/detect")
+async def api_detect_location():
+    """Detect approximate location from server's public IP."""
+    from src.tools import _geolocate_ip
+    geo = _geolocate_ip()
+    if geo:
+        return JSONResponse({"lat": geo[0], "lon": geo[1], "city": geo[2]})
+    return JSONResponse({"error": "Could not detect location"}, status_code=404)
+
 @app.get("/api/version")
 async def api_version():
     """Single source of truth for the OmniAgent version. All platforms read this."""
@@ -1940,7 +1949,7 @@ async def api_server_status():
         "gpu_workers": 0,
         "models": EXPERTS,
         "context_window": OLLAMA_NUM_CTX,
-        "tools": len(TOOL_REGISTRY) if 'TOOL_REGISTRY' not in dir() else 0,
+        "tools": len(TOOL_REGISTRY),
         "sessions_active": len(state._sessions),
         "tasks_completed": state.tasks_completed,
         "llm_calls": state.total_llm_calls,
@@ -1966,12 +1975,6 @@ async def api_server_status():
         status["tts"] = caps.get("tts", {}).get("available", False)
         status["vision"] = caps.get("vision", {}).get("available", False)
         status["image_gen"] = caps.get("image_gen", {}).get("available", False)
-    except Exception:
-        pass
-    # Tools count
-    try:
-        from src.tools import TOOL_REGISTRY
-        status["tools"] = len(TOOL_REGISTRY)
     except Exception:
         pass
     return JSONResponse(status)

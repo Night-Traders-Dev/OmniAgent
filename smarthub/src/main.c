@@ -92,6 +92,7 @@ static TTF_Font *font_large = NULL;
 static TTF_Font *font_huge = NULL;
 
 static char server_url[MAX_URL_LEN] = "";
+static char detected_city[128] = "";
 static char input_text[MAX_MSG_LEN] = "";
 static int input_cursor = 0;
 static bool input_active = false;
@@ -316,30 +317,56 @@ static void fetch_metrics(void) {
     }
 }
 
-static void fetch_weather(void) {
+static void detect_location(void) {
+    if (detected_city[0]) return; /* Already detected */
     char url[MAX_URL_LEN + 64];
-    /* Use MCP to call weather tool */
-    snprintf(url, sizeof(url), "%s/mcp", server_url);
-    char *resp = http_post(url,
+    snprintf(url, sizeof(url), "%s/api/location/detect", server_url);
+    char *resp = http_get(url);
+    if (resp) {
+        json_get_string(resp, "city", detected_city, sizeof(detected_city));
+        if (detected_city[0]) {
+            printf("[Hub] Location detected: %s\n", detected_city);
+        }
+        free(resp);
+    }
+    if (!detected_city[0]) {
+        printf("[Hub] Could not detect location — weather widget needs manual city\n");
+    }
+}
+
+static void parse_weather_json(const char *raw_json) {
+    const char *cur = strstr(raw_json, "\"current\"");
+    if (cur) {
+        json_get_string(cur, "location", weather.location, sizeof(weather.location));
+        json_get_string(cur, "temperature_f", weather.temp, sizeof(weather.temp));
+        json_get_string(cur, "condition", weather.condition, sizeof(weather.condition));
+        json_get_string(cur, "humidity", weather.humidity, sizeof(weather.humidity));
+        json_get_string(cur, "wind", weather.wind, sizeof(weather.wind));
+        json_get_string(cur, "feels_like_f", weather.feels_like, sizeof(weather.feels_like));
+        weather.valid = true;
+    }
+}
+
+static void fetch_weather(void) {
+    /* Ensure we have a location */
+    if (!detected_city[0]) detect_location();
+
+    /* Build weather request with detected or fallback location */
+    const char *city = detected_city[0] ? detected_city : "auto";
+    char body[512];
+    snprintf(body, sizeof(body),
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\","
-        "\"params\":{\"name\":\"weather\",\"arguments\":{\"location\":\"auto\"}}}");
+        "\"params\":{\"name\":\"weather\",\"arguments\":{\"location\":\"%s\"}}}", city);
+
+    char url[MAX_URL_LEN + 64];
+    snprintf(url, sizeof(url), "%s/mcp", server_url);
+    char *resp = http_post(url, body);
     if (!resp) return;
 
     /* Find RAW_JSON block */
     const char *raw = strstr(resp, "RAW_JSON:");
     if (raw) {
-        raw += 9;
-        while (*raw == '\n' || *raw == ' ') raw++;
-        const char *cur = strstr(raw, "\"current\"");
-        if (cur) {
-            json_get_string(cur, "location", weather.location, sizeof(weather.location));
-            json_get_string(cur, "temperature_f", weather.temp, sizeof(weather.temp));
-            json_get_string(cur, "condition", weather.condition, sizeof(weather.condition));
-            json_get_string(cur, "humidity", weather.humidity, sizeof(weather.humidity));
-            json_get_string(cur, "wind", weather.wind, sizeof(weather.wind));
-            json_get_string(cur, "feels_like_f", weather.feels_like, sizeof(weather.feels_like));
-            weather.valid = true;
-        }
+        parse_weather_json(raw);
     }
     free(resp);
 }
@@ -372,6 +399,11 @@ static void *send_message_thread(void *arg) {
                 snprintf(messages[msg_count].text, MAX_MSG_LEN, "%s", reply);
                 messages[msg_count].is_user = false;
                 msg_count++;
+            }
+            /* If reply contains weather data, update the widget */
+            const char *raw = strstr(reply, "RAW_JSON:");
+            if (raw) {
+                parse_weather_json(raw);
             }
         }
         free(resp);
@@ -702,8 +734,14 @@ static void handle_touch(int x, int y) {
             int bx = ax + 8 + col * (btn_w + 8);
             int by = ay + row * (btn_h + 6);
             if (x >= bx && x <= bx + btn_w && y >= by && y <= by + btn_h) {
-                strncpy(input_text, actions[i].command, sizeof(input_text) - 1);
-                input_cursor = strlen(input_text);
+                /* Weather action — inject detected city */
+                if (i == 0 && detected_city[0]) {
+                    snprintf(input_text, sizeof(input_text),
+                             "What is the weather in %s right now?", detected_city);
+                } else {
+                    snprintf(input_text, sizeof(input_text), "%s", actions[i].command);
+                }
+                input_cursor = (int)strlen(input_text);
                 send_message();
                 return;
             }
