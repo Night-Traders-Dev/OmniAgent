@@ -352,6 +352,45 @@ static void draw_rounded_rect(int x, int y, int w, int h, int radius, Color c) {
     fill_rect(x + w - radius, y + h - radius, radius, radius, c);
 }
 
+/* ═══ Text Texture Cache ═══ */
+/* Avoids re-rendering identical text every frame — massive FPS improvement */
+#define TEXT_CACHE_SIZE 256
+
+typedef struct {
+    uint32_t hash;
+    SDL_Texture *tex;
+    int w, h;
+    Uint32 last_used;  /* SDL_GetTicks() for LRU eviction */
+} TextCacheEntry;
+
+static TextCacheEntry text_cache[TEXT_CACHE_SIZE];
+static int text_cache_hits = 0, text_cache_misses = 0;
+
+static uint32_t text_hash(TTF_Font *f, const char *text, Color c) {
+    /* FNV-1a hash combining font ptr, color, and text */
+    uint32_t h = 2166136261u;
+    h ^= (uint32_t)(uintptr_t)f; h *= 16777619u;
+    h ^= (uint32_t)c.r; h *= 16777619u;
+    h ^= (uint32_t)c.g; h *= 16777619u;
+    h ^= (uint32_t)c.b; h *= 16777619u;
+    h ^= (uint32_t)c.a; h *= 16777619u;
+    for (const char *p = text; *p; p++) {
+        h ^= (uint32_t)(unsigned char)*p;
+        h *= 16777619u;
+    }
+    return h;
+}
+
+static void text_cache_flush(void) {
+    for (int i = 0; i < TEXT_CACHE_SIZE; i++) {
+        if (text_cache[i].tex) {
+            SDL_DestroyTexture(text_cache[i].tex);
+            text_cache[i].tex = NULL;
+            text_cache[i].hash = 0;
+        }
+    }
+}
+
 static SDL_Texture *render_text(TTF_Font *f, const char *text, Color c, int *w, int *h) {
     if (!text || !text[0]) { if (w) *w = 0; if (h) *h = 0; return NULL; }
     SDL_Color sc = {c.r, c.g, c.b, c.a};
@@ -365,12 +404,36 @@ static SDL_Texture *render_text(TTF_Font *f, const char *text, Color c, int *w, 
 }
 
 static void draw_text(TTF_Font *f, const char *text, int x, int y, Color c) {
-    int w, h;
-    SDL_Texture *tex = render_text(f, text, c, &w, &h);
+    if (!text || !text[0]) return;
+    uint32_t h = text_hash(f, text, c);
+    int slot = (int)(h % TEXT_CACHE_SIZE);
+    Uint32 now = SDL_GetTicks();
+
+    /* Cache hit? */
+    if (text_cache[slot].tex && text_cache[slot].hash == h) {
+        text_cache[slot].last_used = now;
+        SDL_Rect dst = {x, y, text_cache[slot].w, text_cache[slot].h};
+        SDL_RenderCopy(renderer, text_cache[slot].tex, NULL, &dst);
+        text_cache_hits++;
+        return;
+    }
+
+    /* Cache miss — render and store */
+    int tw, th;
+    SDL_Texture *tex = render_text(f, text, c, &tw, &th);
     if (!tex) return;
-    SDL_Rect dst = {x, y, w, h};
+
+    SDL_Rect dst = {x, y, tw, th};
     SDL_RenderCopy(renderer, tex, NULL, &dst);
-    SDL_DestroyTexture(tex);
+
+    /* Evict old entry and store new one */
+    if (text_cache[slot].tex) SDL_DestroyTexture(text_cache[slot].tex);
+    text_cache[slot].hash = h;
+    text_cache[slot].tex = tex;
+    text_cache[slot].w = tw;
+    text_cache[slot].h = th;
+    text_cache[slot].last_used = now;
+    text_cache_misses++;
 }
 
 __attribute__((unused))
@@ -645,22 +708,33 @@ static void *weather_thread_fn(void *arg) {
     if (!detected_city[0]) detect_location();
 
     const char *city = detected_city[0] ? detected_city : "auto";
-    char body[512];
-    snprintf(body, sizeof(body),
-        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\","
-        "\"params\":{\"name\":\"weather\",\"arguments\":{\"location\":\"%s\"}}}", city);
+    char url[MAX_URL_LEN + 256];
+    /* Use the dedicated REST endpoint — no auth required, returns clean JSON */
+    char encoded_city[128];
+    /* Simple URL encode: replace spaces with %20 */
+    const char *src = city;
+    char *dst = encoded_city;
+    while (*src && dst < encoded_city + sizeof(encoded_city) - 4) {
+        if (*src == ' ') { *dst++ = '%'; *dst++ = '2'; *dst++ = '0'; }
+        else { *dst++ = *src; }
+        src++;
+    }
+    *dst = '\0';
+    snprintf(url, sizeof(url), "%s/api/hub/weather?location=%s", server_url, encoded_city);
 
-    char url[MAX_URL_LEN + 64];
-    snprintf(url, sizeof(url), "%s/mcp", server_url);
-    char *resp = http_post(url, body);
+    char *resp = http_get(url);
     if (resp) {
-        /* The response is a JSON-RPC wrapper with escaped text inside.
-           Unescape twice — outer JSON escaping + inner RAW_JSON escaping. */
-        json_unescape(resp);
-        json_unescape(resp);
-        const char *raw = strstr(resp, "RAW_JSON:");
-        if (raw) parse_weather_json(raw);
+        printf("[Hub] Weather response (%zu bytes): %.200s\n", strlen(resp), resp);
+        /* Response is clean JSON with "current" at the top level */
+        const char *cur = strstr(resp, "\"current\"");
+        if (cur) {
+            parse_weather_json(resp);
+        } else {
+            printf("[Hub] Weather: no 'current' key found in response\n");
+        }
         free(resp);
+    } else {
+        printf("[Hub] Weather: HTTP request failed\n");
     }
     weather_fetching = false;
     return NULL;
@@ -933,7 +1007,7 @@ static void *send_message_thread(void *arg) {
         free(resp);
     } else {
         if (msg_count < MAX_MESSAGES) {
-            strcpy(messages[msg_count].text, "Connection error — check server");
+            snprintf(messages[msg_count].text, sizeof(messages[msg_count].text), "Connection error — check server");
             messages[msg_count].is_user = false;
             msg_count++;
         }
@@ -1613,8 +1687,8 @@ static void draw_chat(void) {
         /* If no log entries yet, show waiting animation */
         if (thinking_count == 0 && is_sending) {
             int dots = ((SDL_GetTicks() / 400) % 4);
-            char wait[16] = "Waiting";
-            for (int d = 0; d < dots; d++) strcat(wait, ".");
+            const char *dot_strs[] = {"Waiting", "Waiting.", "Waiting..", "Waiting..."};
+            const char *wait = dot_strs[dots];
             draw_text(font_small, wait, panel_x + 12, log_y, COL_DIM);
         }
 
@@ -2226,7 +2300,7 @@ int main(int argc, char *argv[]) {
                 if (event.type == SDL_TEXTINPUT && !vkb.visible) {
                     size_t len = strlen(connect_url_input);
                     if (len + strlen(event.text.text) < sizeof(connect_url_input) - 1) {
-                        strcat(connect_url_input, event.text.text);
+                        strncat(connect_url_input, event.text.text, sizeof(connect_url_input) - 1 - len);
                     }
                 } else if (event.type == SDL_KEYDOWN && !vkb.visible) {
                     if (event.key.keysym.sym == SDLK_RETURN) {
@@ -2259,8 +2333,8 @@ int main(int argc, char *argv[]) {
                 if (!vkb.visible && input_active) {
                     size_t len = strlen(input_text);
                     if (len + strlen(event.text.text) < sizeof(input_text) - 1) {
-                        strcat(input_text, event.text.text);
-                        input_cursor = strlen(input_text);
+                        strncat(input_text, event.text.text, sizeof(input_text) - 1 - len);
+                        input_cursor = (int)strlen(input_text);
                     }
                 }
                 break;
@@ -2358,6 +2432,7 @@ int main(int argc, char *argv[]) {
     if (font_regular) TTF_CloseFont(font_regular);
     if (font_large) TTF_CloseFont(font_large);
     if (font_huge) TTF_CloseFont(font_huge);
+    text_cache_flush();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     /* Free thumbnail textures */

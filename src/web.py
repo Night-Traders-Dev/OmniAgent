@@ -2743,6 +2743,22 @@ def _hub_format_market_line(label: str, items: list[dict], *, kind: str) -> str:
             continue
     return f"{label}: {', '.join(formatted)}" if formatted else f"{label}: No data"
 
+@app.get("/api/hub/weather")
+async def hub_weather(location: str = "auto"):
+    """Fetch weather data for the Smart Hub. Returns structured JSON."""
+    from src.tools import get_weather
+    import json as _json
+    raw = await asyncio.get_event_loop().run_in_executor(None, get_weather, location)
+    # Extract RAW_JSON block
+    marker = "RAW_JSON:"
+    idx = raw.find(marker)
+    if idx >= 0:
+        try:
+            return JSONResponse(_json.loads(raw[idx + len(marker):]))
+        except Exception:
+            pass
+    return JSONResponse({"text": raw, "current": {"location": location, "condition": "Unknown"}})
+
 @app.get("/api/hub/news")
 async def hub_news(category: str = "top"):
     """Fetch news headlines for the Smart Hub Live Area.

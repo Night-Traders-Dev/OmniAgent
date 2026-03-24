@@ -51,12 +51,39 @@ def search_all_conversations(user_id: int, query: str, limit: int = 20) -> list[
     finally:
         conn.close()
 
-    query_lower = query.lower()
-    results = []
+    # Decrypt all messages first, then use C accelerator for fast search
+    decrypted = []
+    row_map = []
     for row in rows:
         try:
             content = decrypt(row[3])
+            decrypted.append(content)
+            row_map.append(row)
+        except Exception:
+            continue
+
+    # Use C extension for fast case-insensitive matching if available
+    try:
+        from src._accel import fuzzy_match
+        match_indices = fuzzy_match(decrypted, query)
+        results = []
+        for idx in match_indices[:limit]:
+            row = row_map[idx]
+            results.append({
+                "message_id": row[0],
+                "session_id": row[1],
+                "role": row[2],
+                "content": decrypted[idx][:200],
+                "created_at": row[4],
+                "session_title": row[5],
+            })
+    except ImportError:
+        # Fallback to pure Python
+        query_lower = query.lower()
+        results = []
+        for i, content in enumerate(decrypted):
             if query_lower in content.lower():
+                row = row_map[i]
                 results.append({
                     "message_id": row[0],
                     "session_id": row[1],
@@ -67,8 +94,6 @@ def search_all_conversations(user_id: int, query: str, limit: int = 20) -> list[
                 })
                 if len(results) >= limit:
                     break
-        except Exception:
-            continue
     # Cache results
     _search_cache[cache_key] = (_time.time(), results)
     # Evict old cache entries

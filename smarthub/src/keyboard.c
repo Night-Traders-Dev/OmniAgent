@@ -187,7 +187,7 @@ static void kb_insert_text(Keyboard *kb, const char *text) {
     size_t cur_len = strlen(kb->target_buf);
     size_t add_len = strlen(text);
     if ((int)(cur_len + add_len) >= kb->target_max - 1) return;
-    strcat(kb->target_buf, text);
+    strncat(kb->target_buf, text, (size_t)(kb->target_max - 1 - (int)cur_len));
     if (kb->target_cursor) *kb->target_cursor = (int)strlen(kb->target_buf);
 }
 

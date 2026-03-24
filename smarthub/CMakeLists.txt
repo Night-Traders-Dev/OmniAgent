@@ -36,6 +36,15 @@ target_link_libraries(omni-hub PRIVATE
     pthread
 )
 
-target_compile_options(omni-hub PRIVATE -Wall -Wextra -O2)
+# Security hardening + performance
+target_compile_options(omni-hub PRIVATE
+    -Wall -Wextra -O2
+    -Wformat=2 -Wformat-security -Werror=format-security
+    -fstack-protector-strong
+    -fPIE
+    -Wno-unused-parameter -Wno-unused-function
+)
+target_compile_definitions(omni-hub PRIVATE _FORTIFY_SOURCE=2)
+target_link_options(omni-hub PRIVATE -pie)
 
 install(TARGETS omni-hub DESTINATION bin)
