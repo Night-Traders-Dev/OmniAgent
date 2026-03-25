@@ -5,6 +5,7 @@
  *   - Layered flowing sine waves with soft glow
  *   - Drifting bokeh particles with gentle pulse
  *   - Deep gradient base color that subtly shifts
+ *   - Palette bank rotation every 10 minutes with smooth crossfade
  *
  * Runs entirely on CPU via SDL2 renderer with alpha blending.
  * Designed to be lightweight enough for the IMG BXE-2-32 GPU
@@ -20,12 +21,14 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+#define BG_PALETTE_SWITCH_SECONDS 600.0f   /* 10 minutes */
+#define BG_PALETTE_BLEND_SECONDS   12.0f   /* smooth crossfade */
+
 /* ═══ Random helpers ═══ */
 static float randf(void) { return (float)rand() / (float)RAND_MAX; }
 static float randf_range(float lo, float hi) { return lo + randf() * (hi - lo); }
 
-/* ═══ Color palettes ═══ */
-/* Deep ocean / aurora theme (warm-cool mix, cozy feel) */
+/* ═══ Color types ═══ */
 typedef struct { Uint8 r, g, b; } RGB;
 typedef struct {
     float position;
@@ -34,33 +37,105 @@ typedef struct {
     RGB accent;
 } ThemeStop;
 
-static const RGB palette[] = {
-    {100, 140, 220},  /* soft blue */
-    {140, 100, 200},  /* lavender */
-    {80,  160, 180},  /* teal */
-    {180, 120, 160},  /* rose */
-    {100, 180, 140},  /* mint */
-    {200, 150, 100},  /* warm amber */
-    {120, 130, 200},  /* periwinkle */
-    {160, 100, 140},  /* mauve */
-};
-#define PALETTE_SIZE (sizeof(palette) / sizeof(palette[0]))
+/* ═══ Palette bank ═══ */
+/*
+ * Each palette is a set of 8 colors used by particles and wave tinting.
+ * We rotate to the next palette every 10 minutes.
+ */
+#define PALETTE_COLOR_COUNT 8
+#define PALETTE_BANK_COUNT  6
 
+typedef struct {
+    RGB colors[PALETTE_COLOR_COUNT];
+} PaletteBank;
+
+static const PaletteBank palette_bank[PALETTE_BANK_COUNT] = {
+    /* 0: Ocean Aurora */
+    {{
+        {100, 140, 220},
+        {140, 100, 200},
+        { 80, 160, 180},
+        {180, 120, 160},
+        {100, 180, 140},
+        {200, 150, 100},
+        {120, 130, 200},
+        {160, 100, 140},
+    }},
+    /* 1: Neon Dusk */
+    {{
+        { 80, 110, 240},
+        {170,  80, 230},
+        { 60, 220, 210},
+        {255, 100, 170},
+        {110, 170, 255},
+        {220, 110, 255},
+        {110, 255, 180},
+        {255, 170, 100},
+    }},
+    /* 2: Emerald Night */
+    {{
+        { 70, 140, 120},
+        { 90, 180, 150},
+        { 40, 120, 100},
+        {120, 200, 160},
+        { 80, 160, 110},
+        {150, 220, 180},
+        { 50, 100,  90},
+        {110, 170, 140},
+    }},
+    /* 3: Royal Violet */
+    {{
+        {110,  90, 180},
+        {140, 100, 220},
+        {180, 100, 240},
+        {100,  80, 150},
+        {160, 120, 210},
+        {200, 140, 255},
+        {130, 100, 170},
+        {170, 130, 220},
+    }},
+    /* 4: Ember Sunset */
+    {{
+        {220, 110,  80},
+        {255, 140, 100},
+        {200, 100, 140},
+        {255, 180,  90},
+        {180,  90,  90},
+        {255, 120, 150},
+        {240, 160, 110},
+        {200, 120,  80},
+    }},
+    /* 5: Ice Glass */
+    {{
+        {130, 180, 255},
+        {170, 220, 255},
+        {110, 210, 240},
+        {180, 200, 255},
+        {140, 240, 220},
+        {200, 240, 255},
+        {120, 170, 220},
+        {150, 210, 255},
+    }},
+};
+
+/* Day theme stops remain separate from palette cycling */
 static const ThemeStop theme_stops[] = {
-    {0.00f, {8, 10, 18}, {16, 16, 30}, {24, 18, 62}},
-    {0.22f, {14, 12, 22}, {30, 18, 40}, {88, 52, 92}},
-    {0.38f, {10, 14, 24}, {20, 28, 42}, {42, 94, 126}},
-    {0.60f, {8, 14, 24}, {18, 26, 40}, {26, 110, 92}},
-    {0.78f, {16, 11, 20}, {34, 18, 32}, {112, 66, 44}},
-    {0.90f, {10, 10, 20}, {20, 14, 32}, {68, 30, 88}},
-    {1.00f, {8, 10, 18}, {16, 16, 30}, {24, 18, 62}},
+    {0.00f, { 8, 10, 18}, {16, 16, 30}, { 24,  18,  62}},
+    {0.22f, {14, 12, 22}, {30, 18, 40}, { 88,  52,  92}},
+    {0.38f, {10, 14, 24}, {20, 28, 42}, { 42,  94, 126}},
+    {0.60f, { 8, 14, 24}, {18, 26, 40}, { 26, 110,  92}},
+    {0.78f, {16, 11, 20}, {34, 18, 32}, {112,  66,  44}},
+    {0.90f, {10, 10, 20}, {20, 14, 32}, { 68,  30,  88}},
+    {1.00f, { 8, 10, 18}, {16, 16, 30}, { 24,  18,  62}},
 };
 #define THEME_STOP_COUNT (sizeof(theme_stops) / sizeof(theme_stops[0]))
 
 /* ═══ Theme helpers ═══ */
 
 static Uint8 lerp_u8(Uint8 a, Uint8 b, float t) {
-    return (Uint8)(a + (b - a) * t);
+    if (t < 0.0f) t = 0.0f;
+    if (t > 1.0f) t = 1.0f;
+    return (Uint8)((float)a + ((float)b - (float)a) * t);
 }
 
 static RGB lerp_rgb(RGB a, RGB b, float t) {
@@ -106,49 +181,108 @@ static void sample_day_theme(float progress, RGB *top, RGB *bottom, RGB *accent)
     float span = theme_stops[next].position - theme_stops[prev].position;
     float t = span > 0.0f ? (clamped - theme_stops[prev].position) / span : 0.0f;
 
-    *top = lerp_rgb(theme_stops[prev].top, theme_stops[next].top, t);
+    *top    = lerp_rgb(theme_stops[prev].top,    theme_stops[next].top,    t);
     *bottom = lerp_rgb(theme_stops[prev].bottom, theme_stops[next].bottom, t);
     *accent = lerp_rgb(theme_stops[prev].accent, theme_stops[next].accent, t);
+}
+
+/* ═══ Palette rotation helpers ═══ */
+
+static float current_clock_seconds(void) {
+    time_t now = time(NULL);
+    struct tm local_tm;
+#if defined(_POSIX_VERSION)
+    localtime_r(&now, &local_tm);
+#else
+    struct tm *tmp = localtime(&now);
+    if (!tmp) return 0.0f;
+    local_tm = *tmp;
+#endif
+    return (float)local_tm.tm_hour * 3600.0f +
+           (float)local_tm.tm_min * 60.0f +
+           (float)local_tm.tm_sec;
+}
+
+static void sample_active_palette(RGB out[PALETTE_COLOR_COUNT]) {
+    float seconds = current_clock_seconds();
+
+    int slot = (int)(seconds / BG_PALETTE_SWITCH_SECONDS);
+    int cur_idx  = slot % PALETTE_BANK_COUNT;
+    int next_idx = (cur_idx + 1) % PALETTE_BANK_COUNT;
+
+    float slot_progress = fmodf(seconds, BG_PALETTE_SWITCH_SECONDS) / BG_PALETTE_SWITCH_SECONDS;
+
+    /*
+     * Blend only near the end of the current slot so the palette feels stable
+     * most of the time, then gently transitions into the next one.
+     */
+    float blend = 0.0f;
+    float blend_start = 1.0f - (BG_PALETTE_BLEND_SECONDS / BG_PALETTE_SWITCH_SECONDS);
+    if (slot_progress > blend_start) {
+        blend = (slot_progress - blend_start) / (1.0f - blend_start);
+        if (blend < 0.0f) blend = 0.0f;
+        if (blend > 1.0f) blend = 1.0f;
+    }
+
+    for (int i = 0; i < PALETTE_COLOR_COUNT; i++) {
+        out[i] = lerp_rgb(
+            palette_bank[cur_idx].colors[i],
+            palette_bank[next_idx].colors[i],
+            blend
+        );
+    }
+}
+
+static RGB palette_pick(const RGB active_palette[PALETTE_COLOR_COUNT], int idx) {
+    if (idx < 0) idx = 0;
+    return active_palette[idx % PALETTE_COLOR_COUNT];
 }
 
 /* ═══ Initialization ═══ */
 
 static void init_particle(BGParticle *p, int w, int h) {
-    RGB c = palette[rand() % PALETTE_SIZE];
-    p->x = randf() * w;
-    p->y = randf() * h;
+    p->x = randf() * (float)w;
+    p->y = randf() * (float)h;
     p->vx = randf_range(-8.0f, 8.0f);
     p->vy = randf_range(-4.0f, 4.0f);
     p->radius = randf_range(2.0f, 20.0f);
     p->alpha = randf_range(0.03f, 0.15f);
     p->pulse_phase = randf() * (float)(2.0 * M_PI);
-    p->r = c.r;
-    p->g = c.g;
-    p->b = c.b;
+
+    /*
+     * Store a palette slot index in p->r initially if your BGParticle has only
+     * r/g/b fields and no palette index field. We overwrite actual display color
+     * at render time anyway.
+     *
+     * If you do have a palette_index field in BGParticle, use that instead.
+     */
+    {
+        Uint8 slot = (Uint8)(rand() % PALETTE_COLOR_COUNT);
+        p->r = slot;
+        p->g = 0;
+        p->b = 0;
+    }
 }
 
 void bg_init(AnimatedBG *bg) {
     memset(bg, 0, sizeof(AnimatedBG));
 
-    /* Deep dark blue-purple base */
     bg->bg_r = 8;
     bg->bg_g = 10;
     bg->bg_b = 18;
 
-    /* Particles */
     bg->particle_count = BG_MAX_PARTICLES;
     for (int i = 0; i < bg->particle_count; i++) {
-        init_particle(&bg->particles[i], 1920, 1080); /* max expected size */
+        init_particle(&bg->particles[i], 1920, 1080);
     }
 
-    /* Waves — layered sine waves at different depths */
     bg->wave_count = BG_MAX_WAVES;
 
-    bg->waves[0] = (BGWave){0, 0.15f, 40.0f, 0.003f, 0.75f, 60, 80, 160, 18};
-    bg->waves[1] = (BGWave){1.2f, 0.22f, 30.0f, 0.005f, 0.6f, 100, 60, 160, 14};
-    bg->waves[2] = (BGWave){2.5f, 0.10f, 55.0f, 0.002f, 0.85f, 40, 100, 140, 10};
-    bg->waves[3] = (BGWave){0.8f, 0.30f, 20.0f, 0.008f, 0.45f, 120, 80, 120, 8};
-    bg->waves[4] = (BGWave){3.0f, 0.18f, 35.0f, 0.004f, 0.55f, 80, 120, 100, 12};
+    bg->waves[0] = (BGWave){0.0f, 0.15f, 40.0f, 0.003f, 0.75f,  60,  80, 160, 18};
+    bg->waves[1] = (BGWave){1.2f, 0.22f, 30.0f, 0.005f, 0.60f, 100,  60, 160, 14};
+    bg->waves[2] = (BGWave){2.5f, 0.10f, 55.0f, 0.002f, 0.85f,  40, 100, 140, 10};
+    bg->waves[3] = (BGWave){0.8f, 0.30f, 20.0f, 0.008f, 0.45f, 120,  80, 120,  8};
+    bg->waves[4] = (BGWave){3.0f, 0.18f, 35.0f, 0.004f, 0.55f,  80, 120, 100, 12};
 
     bg->initialized = true;
 }
@@ -158,31 +292,27 @@ void bg_init(AnimatedBG *bg) {
 void bg_update(AnimatedBG *bg, float dt) {
     bg->time += dt;
 
-    /* Update particles */
     for (int i = 0; i < bg->particle_count; i++) {
         BGParticle *p = &bg->particles[i];
         p->x += p->vx * dt;
         p->y += p->vy * dt;
         p->pulse_phase += dt * 1.5f;
 
-        /* Wrap around screen edges with margin */
-        if (p->x < -50) p->x += 1970;
-        if (p->x > 1970) p->x -= 1970;
-        if (p->y < -50) p->y += 1130;
-        if (p->y > 1130) p->y -= 1130;
+        if (p->x < -50.0f) p->x += 1970.0f;
+        if (p->x > 1970.0f) p->x -= 1970.0f;
+        if (p->y < -50.0f) p->y += 1130.0f;
+        if (p->y > 1130.0f) p->y -= 1130.0f;
     }
 
-    /* Update wave phases */
     for (int i = 0; i < bg->wave_count; i++) {
         bg->waves[i].phase += bg->waves[i].speed * dt;
     }
 }
 
-/* ═══ Rendering ═══ */
+/* ═══ Rendering helpers ═══ */
 
 static void render_soft_circle(SDL_Renderer *ren, int cx, int cy, float radius,
-                                Uint8 r, Uint8 g, Uint8 b, float alpha) {
-    /* Draw concentric circles with decreasing alpha for a soft glow effect */
+                               Uint8 r, Uint8 g, Uint8 b, float alpha) {
     int layers = (int)(radius / 2.0f);
     if (layers < 2) layers = 2;
     if (layers > 8) layers = 8;
@@ -197,7 +327,6 @@ static void render_soft_circle(SDL_Renderer *ren, int cx, int cy, float radius,
         SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
         SDL_SetRenderDrawColor(ren, r, g, b, a);
 
-        /* Filled circle approximation using horizontal lines */
         int ri = (int)lr;
         for (int dy = -ri; dy <= ri; dy++) {
             int dx = (int)sqrtf((float)(ri * ri - dy * dy));
@@ -206,14 +335,22 @@ static void render_soft_circle(SDL_Renderer *ren, int cx, int cy, float radius,
     }
 }
 
-static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h, RGB accent) {
+static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h,
+                        RGB accent, const RGB active_palette[PALETTE_COLOR_COUNT], int palette_slot) {
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
-    RGB wave_color = tint_rgb((RGB){wave->r, wave->g, wave->b}, accent, 0.18f);
+
+    RGB base = palette_pick(active_palette, palette_slot);
+    RGB wave_seed = {
+        lerp_u8((Uint8)wave->r, base.r, 0.55f),
+        lerp_u8((Uint8)wave->g, base.g, 0.55f),
+        lerp_u8((Uint8)wave->b, base.b, 0.55f)
+    };
+    RGB wave_color = tint_rgb(wave_seed, accent, 0.18f);
+
     SDL_SetRenderDrawColor(ren, wave_color.r, wave_color.g, wave_color.b, wave->a);
 
-    float base_y = wave->y_base * h;
+    float base_y = wave->y_base * (float)h;
 
-    /* Draw filled wave by connecting vertical strips */
     int prev_y = -1;
     for (int x = 0; x < w; x += 2) {
         float fx = (float)x;
@@ -225,11 +362,9 @@ static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h, RGB accen
         if (iy < 0) iy = 0;
         if (iy > h) iy = h;
 
-        /* Fill from wave line to bottom */
         SDL_Rect strip = {x, iy, 2, h - iy};
         SDL_RenderFillRect(ren, &strip);
 
-        /* Glow line at the wave crest */
         if (prev_y >= 0) {
             Uint8 glow_a = (Uint8)(wave->a * 3 > 255 ? 255 : wave->a * 3);
             SDL_SetRenderDrawColor(ren, wave_color.r, wave_color.g, wave_color.b, glow_a);
@@ -240,52 +375,67 @@ static void render_wave(SDL_Renderer *ren, BGWave *wave, int w, int h, RGB accen
     }
 }
 
+/* ═══ Rendering ═══ */
+
 void bg_render(AnimatedBG *bg, SDL_Renderer *ren, int w, int h) {
     if (!bg->initialized) return;
-    RGB top_color, bottom_color, accent_color;
-    sample_day_theme(current_day_progress(), &top_color, &bottom_color, &accent_color);
 
-    /* Base gradient — dark at top, slightly lighter at bottom */
+    RGB top_color, bottom_color, accent_color;
+    RGB active_palette[PALETTE_COLOR_COUNT];
+
+    sample_day_theme(current_day_progress(), &top_color, &bottom_color, &accent_color);
+    sample_active_palette(active_palette);
+
+    /* Base gradient */
     for (int y = 0; y < h; y += 4) {
         float t = (float)y / (float)h;
         RGB row = lerp_rgb(top_color, bottom_color, t);
-        Uint8 r = row.r;
-        Uint8 g = row.g;
-        Uint8 b = row.b;
-        SDL_SetRenderDrawColor(ren, r, g, b, 255);
+        SDL_SetRenderDrawColor(ren, row.r, row.g, row.b, 255);
         SDL_Rect strip = {0, y, w, 4};
         SDL_RenderFillRect(ren, &strip);
     }
 
-    /* Subtle color shift over time */
-    float pulse = 0.85f + 0.15f * (sinf(bg->time * 0.05f) * 0.5f + 0.5f);
-    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
-    SDL_SetRenderDrawColor(
-        ren,
-        accent_color.r,
-        accent_color.g,
-        accent_color.b,
-        (Uint8)(6.0f * pulse)
-    );
-    SDL_Rect full = {0, 0, w, h};
-    SDL_RenderFillRect(ren, &full);
-
-    /* Render waves (back to front) */
-    for (int i = 0; i < bg->wave_count; i++) {
-        render_wave(ren, &bg->waves[i], w, h, accent_color);
+    /* Subtle accent overlay */
+    {
+        float pulse = 0.85f + 0.15f * (sinf(bg->time * 0.05f) * 0.5f + 0.5f);
+        SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_ADD);
+        SDL_SetRenderDrawColor(
+            ren,
+            accent_color.r,
+            accent_color.g,
+            accent_color.b,
+            (Uint8)(6.0f * pulse)
+        );
+        SDL_Rect full = {0, 0, w, h};
+        SDL_RenderFillRect(ren, &full);
     }
 
-    /* Render particles */
+    /* Render waves with rotating palette slots */
+    for (int i = 0; i < bg->wave_count; i++) {
+        render_wave(ren, &bg->waves[i], w, h, accent_color, active_palette, i);
+    }
+
+    /* Render particles using current active palette */
     for (int i = 0; i < bg->particle_count; i++) {
         BGParticle *p = &bg->particles[i];
         float pulse = 0.6f + 0.4f * sinf(p->pulse_phase);
         float alpha = p->alpha * pulse;
         float radius = p->radius * (0.8f + 0.2f * pulse);
-        RGB particle_color = tint_rgb((RGB){p->r, p->g, p->b}, accent_color, 0.24f);
-        render_soft_circle(ren, (int)p->x, (int)p->y, radius,
-                           particle_color.r, particle_color.g, particle_color.b, alpha);
+
+        /*
+         * p->r is being used as a stable palette slot assigned at init.
+         * This lets particles keep their identity while the palette itself rotates.
+         */
+        int palette_slot = (int)(p->r % PALETTE_COLOR_COUNT);
+        RGB base_particle = palette_pick(active_palette, palette_slot);
+        RGB particle_color = tint_rgb(base_particle, accent_color, 0.24f);
+
+        render_soft_circle(
+            ren,
+            (int)p->x, (int)p->y, radius,
+            particle_color.r, particle_color.g, particle_color.b, alpha
+        );
     }
 
-    /* Reset blend mode */
     SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
 }
