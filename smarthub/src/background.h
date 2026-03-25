@@ -17,6 +17,11 @@ typedef struct {
     float radius;
     float alpha;
     float pulse_phase;
+
+    /* Stable palette index used when rotating palettes every 10 minutes */
+    Uint8 palette_slot;
+
+    /* Optional cached/base color fields */
     Uint8 r, g, b;
 } BGParticle;
 
@@ -32,10 +37,13 @@ typedef struct {
 typedef struct {
     BGParticle particles[BG_MAX_PARTICLES];
     int particle_count;
+
     BGWave waves[BG_MAX_WAVES];
     int wave_count;
+
     float time;
     bool initialized;
+
     /* Color theme */
     Uint8 bg_r, bg_g, bg_b;
 } AnimatedBG;
