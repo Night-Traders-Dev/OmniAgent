@@ -5,7 +5,7 @@
  *   Row 1: q w e r t y u i o p
  *   Row 2:  a s d f g h j k l
  *   Row 3: [shift] z x c v b n m [backspace]
- *   Row 4: [?123] [,] [________space________] [.] [enter]
+ *   Row 4: [?123] [,] [________space________] [.] [Hide] [enter]
  *
  * Features:
  *   - QWERTY / Shift / Caps Lock (double-tap shift)
@@ -13,6 +13,8 @@
  *   - Symbols layer (=\<)
  *   - Key popup on press
  *   - Backspace auto-repeat on long press
+ *   - Dedicated Hide button
+ *   - Ignores synthetic mouse events generated from touch
  *   - Themed to match OmniAgent dark UI
  */
 #include "keyboard.h"
@@ -22,15 +24,21 @@
 /* ═══ Colors (matching main UI) ═══ */
 typedef struct { Uint8 r, g, b, a; } KBColor;
 
-static const KBColor KB_BG         = {17, 24, 32, 245};
-static const KBColor KB_KEY_BG     = {30, 40, 54, 255};
-static const KBColor KB_KEY_PRESS  = {74, 158, 255, 255};
-static const KBColor KB_KEY_SPECIAL= {22, 29, 39, 255};
-static const KBColor KB_KEY_ENTER  = {74, 158, 255, 255};
-static const KBColor KB_TEXT       = {224, 232, 240, 255};
-static const KBColor KB_TEXT_DIM   = {106, 122, 138, 255};
-static const KBColor KB_POPUP_BG   = {50, 65, 85, 255};
-static const KBColor KB_BORDER     = {40, 55, 72, 255};
+static const KBColor KB_BG          = {17, 24, 32, 245};
+static const KBColor KB_KEY_BG      = {30, 40, 54, 255};
+static const KBColor KB_KEY_PRESS   = {74, 158, 255, 255};
+static const KBColor KB_KEY_SPECIAL = {22, 29, 39, 255};
+static const KBColor KB_KEY_ENTER   = {74, 158, 255, 255};
+static const KBColor KB_TEXT        = {224, 232, 240, 255};
+static const KBColor KB_TEXT_DIM    = {106, 122, 138, 255};
+static const KBColor KB_POPUP_BG    = {50, 65, 85, 255};
+static const KBColor KB_BORDER      = {40, 55, 72, 255};
+
+/*
+ * Touch devices often emit both SDL_FINGER* and synthetic SDL_MOUSE* events.
+ * This window suppresses the synthetic mouse event immediately following touch.
+ */
+#define KB_TOUCH_MOUSE_SUPPRESS_MS 250
 
 /* ═══ Key Layouts ═══ */
 
@@ -54,6 +62,9 @@ static const char *N_ROW3[] = {"*","\"","'",":",";","!","?", NULL};
 static const char *S_ROW1[] = {"~","`","|","^","\\","{","}","[","]","%", NULL};
 static const char *S_ROW2[] = {"<",">","=","/","€","£","¥","•","°", NULL};
 static const char *S_ROW3[] = {"©","®","™","¶","§","¡","¿", NULL};
+
+static Uint32 g_last_touch_down_ms = 0;
+static Uint32 g_last_touch_up_ms   = 0;
 
 static void build_char_row(KBRow *row, const char **chars) {
     row->count = 0;
@@ -79,7 +90,7 @@ static void get_layout_rows(KBLayout layout, KBRow rows[KB_ROWS]) {
     /* Row 1: characters */
     build_char_row(&rows[0], r1);
 
-    /* Row 2: characters (slightly indented via narrower keys — handled in render) */
+    /* Row 2: characters */
     build_char_row(&rows[1], r2);
 
     /* Row 3: [shift/symbols] chars [backspace] */
@@ -121,44 +132,54 @@ static void get_layout_rows(KBLayout layout, KBRow rows[KB_ROWS]) {
     k->width = 1.5f;
     k->action = KB_ACTION_BACKSPACE;
 
-    /* Row 4: [?123/ABC] [,] [_____space_____] [.] [enter] */
+    /*
+     * Row 4:
+     *   letters: [?123] [,] [space] [.] [Hide] [Enter]
+     *   numbers/symbols: [ABC] [,] [space] [.] [Hide] [Enter]
+     */
     rows[3].count = 0;
 
     k = &rows[3].keys[rows[3].count++];
     if (layout == KB_LAYOUT_LOWER || layout == KB_LAYOUT_UPPER) {
         k->label = "?123";
         k->output = NULL;
-        k->width = 1.5f;
+        k->width = 1.35f;
         k->action = KB_ACTION_NUMBERS;
     } else {
         k->label = "ABC";
         k->output = NULL;
-        k->width = 1.5f;
+        k->width = 1.35f;
         k->action = KB_ACTION_ABC;
     }
 
     k = &rows[3].keys[rows[3].count++];
     k->label = ",";
     k->output = ",";
-    k->width = 1.0f;
+    k->width = 0.9f;
     k->action = KB_ACTION_CHAR;
 
     k = &rows[3].keys[rows[3].count++];
     k->label = "space";
     k->output = " ";
-    k->width = 5.0f;
+    k->width = 4.2f;
     k->action = KB_ACTION_SPACE;
 
     k = &rows[3].keys[rows[3].count++];
     k->label = ".";
     k->output = ".";
-    k->width = 1.0f;
+    k->width = 0.9f;
     k->action = KB_ACTION_CHAR;
+
+    k = &rows[3].keys[rows[3].count++];
+    k->label = "Hide";
+    k->output = NULL;
+    k->width = 1.15f;
+    k->action = KB_ACTION_HIDE;
 
     k = &rows[3].keys[rows[3].count++];
     k->label = "Enter";
     k->output = NULL;
-    k->width = 1.5f;
+    k->width = 1.35f;
     k->action = KB_ACTION_ENTER;
 }
 
@@ -178,7 +199,7 @@ void kb_attach(Keyboard *kb, char *buf, int *cursor, int max_len) {
 }
 
 void kb_show(Keyboard *kb)   { kb->visible = true; }
-void kb_hide(Keyboard *kb)   { kb->visible = false; kb->show_popup = false; }
+void kb_hide(Keyboard *kb)   { kb->visible = false; kb->show_popup = false; kb->pressed_row = -1; kb->pressed_col = -1; kb->repeating = false; }
 void kb_toggle(Keyboard *kb) { kb->visible ? kb_hide(kb) : kb_show(kb); }
 int  kb_get_height(Keyboard *kb) { return kb->visible ? KB_HEIGHT : 0; }
 
@@ -195,9 +216,10 @@ static void kb_do_backspace(Keyboard *kb) {
     if (!kb->target_buf) return;
     size_t len = strlen(kb->target_buf);
     if (len == 0) return;
+
     /* Handle UTF-8: walk back to find start of last character */
     size_t i = len - 1;
-    while (i > 0 && (kb->target_buf[i] & 0xC0) == 0x80) i--;
+    while (i > 0 && (((unsigned char)kb->target_buf[i] & 0xC0) == 0x80)) i--;
     kb->target_buf[i] = '\0';
     if (kb->target_cursor) *kb->target_cursor = (int)i;
 }
@@ -206,24 +228,26 @@ static void kb_handle_action(Keyboard *kb, KBAction action, const char *output) 
     switch (action) {
     case KB_ACTION_CHAR:
         kb_insert_text(kb, output);
-        /* Auto-unshift after typing one character (like GBoard) */
         if (kb->layout == KB_LAYOUT_UPPER && !kb->shift_locked) {
             kb->layout = KB_LAYOUT_LOWER;
         }
         break;
+
     case KB_ACTION_SPACE:
         kb_insert_text(kb, " ");
         break;
+
     case KB_ACTION_BACKSPACE:
         kb_do_backspace(kb);
         break;
+
     case KB_ACTION_ENTER:
-        /* Caller handles enter — hide keyboard */
+        /* Caller handles submit; keyboard hides */
         kb_hide(kb);
         break;
+
     case KB_ACTION_SHIFT:
         if (kb->layout == KB_LAYOUT_UPPER) {
-            /* If already upper and pressed again → caps lock */
             kb->shift_locked = !kb->shift_locked;
             if (!kb->shift_locked) kb->layout = KB_LAYOUT_LOWER;
         } else {
@@ -231,18 +255,23 @@ static void kb_handle_action(Keyboard *kb, KBAction action, const char *output) 
             kb->shift_locked = false;
         }
         break;
+
     case KB_ACTION_NUMBERS:
         kb->layout = KB_LAYOUT_NUMBERS;
         break;
+
     case KB_ACTION_SYMBOLS:
         kb->layout = KB_LAYOUT_SYMBOLS;
         break;
+
     case KB_ACTION_ABC:
         kb->layout = KB_LAYOUT_LOWER;
         break;
+
     case KB_ACTION_HIDE:
         kb_hide(kb);
         break;
+
     default:
         break;
     }
@@ -257,15 +286,15 @@ static void calc_key_rects(KBRow rows[KB_ROWS], int kb_x, int kb_y, int kb_w,
     int row_h = (KB_HEIGHT - 8) / KB_ROWS;
 
     for (int r = 0; r < KB_ROWS; r++) {
-        /* Calculate total width units for this row */
-        float total_w = 0;
+        float total_w = 0.0f;
         for (int c = 0; c < rows[r].count; c++) total_w += rows[r].keys[c].width;
 
         float unit_w = (float)(kb_w - (rows[r].count + 1) * KB_KEY_GAP) / total_w;
-        /* Center row 2 (9 keys vs 10) by adding horizontal offset */
-        float x_off = 0;
+
+        /* Slight indent for row 2 */
+        float x_off = 0.0f;
         if (r == 1 && rows[r].count < rows[0].count) {
-            float row0_total = 0;
+            float row0_total = 0.0f;
             for (int c = 0; c < rows[0].count; c++) row0_total += rows[0].keys[c].width;
             float unit0 = (float)(kb_w - (rows[0].count + 1) * KB_KEY_GAP) / row0_total;
             x_off = (unit0 - unit_w) * 0.5f * rows[r].count * 0.5f;
@@ -300,20 +329,64 @@ bool kb_handle_event(Keyboard *kb, SDL_Event *event, int screen_w, int screen_h)
     calc_key_rects(rows, kb_x, kb_y, kb_w, rects);
 
     int tx = -1, ty = -1;
+    bool is_press = false;
+    bool is_release = false;
 
-    if (event->type == SDL_MOUSEBUTTONDOWN) {
-        tx = event->button.x;
-        ty = event->button.y;
-    } else if (event->type == SDL_FINGERDOWN) {
+    Uint32 now = SDL_GetTicks();
+
+    switch (event->type) {
+    case SDL_FINGERDOWN:
         tx = (int)(event->tfinger.x * screen_w);
         ty = (int)(event->tfinger.y * screen_h);
-    } else if (event->type == SDL_MOUSEBUTTONUP || event->type == SDL_FINGERUP) {
+        is_press = true;
+        g_last_touch_down_ms = now;
+        break;
+
+    case SDL_FINGERUP:
+        tx = (int)(event->tfinger.x * screen_w);
+        ty = (int)(event->tfinger.y * screen_h);
+        is_release = true;
+        g_last_touch_up_ms = now;
+        break;
+
+    case SDL_MOUSEBUTTONDOWN:
+        /*
+         * Ignore synthetic mouse events that immediately follow touch.
+         * This is the main fix for the double-character behavior.
+         */
+        if ((now - g_last_touch_down_ms) < KB_TOUCH_MOUSE_SUPPRESS_MS ||
+            (now - g_last_touch_up_ms)   < KB_TOUCH_MOUSE_SUPPRESS_MS) {
+            return false;
+        }
+        tx = event->button.x;
+        ty = event->button.y;
+        is_press = true;
+        break;
+
+    case SDL_MOUSEBUTTONUP:
+        if ((now - g_last_touch_down_ms) < KB_TOUCH_MOUSE_SUPPRESS_MS ||
+            (now - g_last_touch_up_ms)   < KB_TOUCH_MOUSE_SUPPRESS_MS) {
+            return false;
+        }
+        tx = event->button.x;
+        ty = event->button.y;
+        is_release = true;
+        break;
+
+    default:
+        return false;
+    }
+
+    if (is_release) {
+        bool consume = (ty >= kb_y);
         kb->pressed_row = -1;
         kb->pressed_col = -1;
         kb->show_popup = false;
         kb->repeating = false;
-        return ty >= 0 && ty >= kb_y; /* Consume if in keyboard area */
+        return consume;
     }
+
+    if (!is_press) return false;
 
     /* Not a press in the keyboard region */
     if (ty < kb_y) return false;
@@ -322,10 +395,12 @@ bool kb_handle_event(Keyboard *kb, SDL_Event *event, int screen_w, int screen_h)
     for (int r = 0; r < KB_ROWS; r++) {
         for (int c = 0; c < rows[r].count; c++) {
             KeyRect *kr = &rects[r][c];
-            if (tx >= kr->x && tx <= kr->x + kr->w && ty >= kr->y && ty <= kr->y + kr->h) {
+            if (tx >= kr->x && tx <= kr->x + kr->w &&
+                ty >= kr->y && ty <= kr->y + kr->h) {
+
                 kb->pressed_row = r;
                 kb->pressed_col = c;
-                kb->press_time = SDL_GetTicks();
+                kb->press_time = now;
                 kb->repeating = false;
 
                 /* Show popup for character keys */
@@ -333,7 +408,8 @@ bool kb_handle_event(Keyboard *kb, SDL_Event *event, int screen_w, int screen_h)
                     kb->show_popup = true;
                     kb->popup_row = r;
                     kb->popup_col = c;
-                    snprintf(kb->popup_char, sizeof(kb->popup_char), "%s", rows[r].keys[c].output);
+                    snprintf(kb->popup_char, sizeof(kb->popup_char), "%s",
+                             rows[r].keys[c].output);
                 } else {
                     kb->show_popup = false;
                 }
@@ -345,7 +421,7 @@ bool kb_handle_event(Keyboard *kb, SDL_Event *event, int screen_w, int screen_h)
         }
     }
 
-    return true; /* Consume all touches in keyboard region */
+    return true; /* Consume all presses in keyboard region */
 }
 
 /* Call this from main loop for backspace repeat */
@@ -418,33 +494,40 @@ void kb_render(Keyboard *kb, SDL_Renderer *ren, TTF_Font *font, TTF_Font *font_s
             KeyRect *kr = &rects[r][c];
             bool pressed = (r == kb->pressed_row && c == kb->pressed_col);
 
-            /* Key background color */
             KBColor bg;
             if (pressed) {
                 bg = KB_KEY_PRESS;
             } else if (key->action == KB_ACTION_ENTER) {
                 bg = KB_KEY_ENTER;
             } else if (key->action == KB_ACTION_SHIFT && kb->layout == KB_LAYOUT_UPPER) {
-                bg = KB_KEY_PRESS; /* Highlight shift when active */
+                bg = KB_KEY_PRESS;
             } else if (key->action != KB_ACTION_CHAR && key->action != KB_ACTION_SPACE) {
                 bg = KB_KEY_SPECIAL;
             } else {
                 bg = KB_KEY_BG;
             }
 
-            /* Draw key background (rounded-ish) */
             kb_fill_rect(ren, kr->x, kr->y, kr->w, kr->h, bg);
-            /* Subtle top highlight */
-            KBColor highlight = {(Uint8)(bg.r + 15), (Uint8)(bg.g + 15), (Uint8)(bg.b + 15), 255};
+
+            KBColor highlight = {
+                (Uint8)((bg.r > 240) ? 255 : bg.r + 15),
+                (Uint8)((bg.g > 240) ? 255 : bg.g + 15),
+                (Uint8)((bg.b > 240) ? 255 : bg.b + 15),
+                255
+            };
             kb_fill_rect(ren, kr->x, kr->y, kr->w, 1, highlight);
 
-            /* Key label */
             KBColor text_col = KB_TEXT;
-            if (pressed) { text_col.r = 0; text_col.g = 0; text_col.b = 0; text_col.a = 255; }
-            else if (key->action == KB_ACTION_ENTER) { text_col.r = 0; text_col.g = 0; text_col.b = 0; text_col.a = 255; }
+            if (pressed || key->action == KB_ACTION_ENTER) {
+                text_col.r = 0;
+                text_col.g = 0;
+                text_col.b = 0;
+                text_col.a = 255;
+            }
 
             TTF_Font *f = (key->action != KB_ACTION_CHAR && key->action != KB_ACTION_SPACE)
                           ? font_small : font;
+
             kb_draw_text_centered(ren, f, key->label,
                                   kr->x + kr->w / 2, kr->y + kr->h / 2, text_col);
         }
@@ -463,14 +546,16 @@ void kb_render(Keyboard *kb, SDL_Renderer *ren, TTF_Font *font, TTF_Font *font_s
         kb_fill_rect(ren, px, py, pw, ph, KB_POPUP_BG);
         kb_fill_rect(ren, px, py, pw, 1, KB_BORDER);
 
-        /* Large character */
         SDL_Color sc = {255, 255, 255, 255};
         SDL_Surface *surf = TTF_RenderUTF8_Blended(font, kb->popup_char, sc);
         if (surf) {
             SDL_Texture *tex = SDL_CreateTextureFromSurface(ren, surf);
-            /* Scale up 1.5x */
-            SDL_Rect dst = {px + pw/2 - surf->w*3/4, py + ph/2 - surf->h*3/4,
-                            surf->w * 3/2, surf->h * 3/2};
+            SDL_Rect dst = {
+                px + pw / 2 - surf->w * 3 / 4,
+                py + ph / 2 - surf->h * 3 / 4,
+                surf->w * 3 / 2,
+                surf->h * 3 / 2
+            };
             SDL_RenderCopy(ren, tex, NULL, &dst);
             SDL_FreeSurface(surf);
             SDL_DestroyTexture(tex);
@@ -479,7 +564,7 @@ void kb_render(Keyboard *kb, SDL_Renderer *ren, TTF_Font *font, TTF_Font *font_s
 
     /* Shift lock indicator (small dot) */
     if (kb->shift_locked && kb->layout == KB_LAYOUT_UPPER) {
-        KeyRect *kr = &rects[2][0]; /* Shift key */
+        KeyRect *kr = &rects[2][0];
         kb_fill_rect(ren, kr->x + kr->w - 8, kr->y + 4, 4, 4, KB_TEXT);
     }
 }
